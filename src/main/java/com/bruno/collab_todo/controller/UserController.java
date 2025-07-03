@@ -1,5 +1,6 @@
 package com.bruno.collab_todo.controller;
 
+import com.bruno.collab_todo.model.TodoList;
 import com.bruno.collab_todo.model.User;
 import com.bruno.collab_todo.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
