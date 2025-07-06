@@ -11,15 +11,15 @@ public class EmailService {
     @Autowired
     private JavaMailSender mailSender;
 
-    public void sendEmail(String toEmail, String subject, String body) {
+    public void sendEmail(String toEmail, String subject, int code) {
         SimpleMailMessage email = new SimpleMailMessage();
         email.setFrom("bcgmeireles@gmail.com");
         email.setTo(toEmail);
         email.setSubject(subject);
-        email.setText(body);
+        email.setText("Seu código de ativação da conta é: " + code);
 
         mailSender.send(email);
 
-        System.out.println("Email enviado com sucesso");
+        System.out.println("Email enviado com sucesso!");
     }
 }
