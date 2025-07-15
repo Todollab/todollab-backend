@@ -30,8 +30,8 @@ public class UserController {
     public void registerUser(@RequestBody User user) {
         Random random = new Random();
 
-        int min = 10;
-        int max = 20;
+        int min = 1000;
+        int max = 9999;
         int customRangeNumber = random.nextInt(max - min + 1) + min;
 
         code = customRangeNumber;
