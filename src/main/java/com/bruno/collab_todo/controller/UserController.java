@@ -5,6 +5,7 @@ import com.bruno.collab_todo.repository.UserRepository;
 import com.bruno.collab_todo.service.EmailService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -37,6 +38,10 @@ public class UserController {
         code = customRangeNumber;
         emailService.sendEmail(user.getEmail(), "Código de cadastro", customRangeNumber);
 
+        String encodedPassword = new BCryptPasswordEncoder().encode(user.getPassword());
+
+        user.setPassword(encodedPassword);
+
         repository.save(user);
     }
 
@@ -59,6 +64,24 @@ public class UserController {
             }
         } else {
             return ResponseEntity.ok("Usuário já ativado!");
+        }
+    }
+
+    @GetMapping("/login")
+    public ResponseEntity<?> loginUser(@RequestBody Map<String, String> body) {
+        String email = body.get("email");
+        String password = body.get("password");
+
+        Optional<User> user = repository.findByEmail(email);
+
+        if (user.isPresent()) {
+            boolean matchPassword = new BCryptPasswordEncoder().matches(password, user.get().getPassword());
+
+            return matchPassword
+                    ? ResponseEntity.ok(user.get())
+                    : ResponseEntity.badRequest().body("Credenciais inválidas");
+        } else {
+            return ResponseEntity.badRequest().body("Credenciais inválidas");
         }
     }
 }
