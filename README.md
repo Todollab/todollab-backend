@@ -1,24 +1,57 @@
-# Getting Started
+# 📋 CollabTodo - Lista de Tarefas Colaborativa
 
-### Reference Documentation
-For further reference, please consider the following sections:
+Este é o **CollabTodo**, um sistema de gerenciamento de tarefas com foco na **colaboração em tempo real** entre usuários. Desenvolvido com **Java + Spring Boot** no back-end e banco de dados **PostgreSQL**, esse projeto é ideal para equipes que precisam organizar e compartilhar listas de afazeres.
 
-* [Official Apache Maven documentation](https://maven.apache.org/guides/index.html)
-* [Spring Boot Maven Plugin Reference Guide](https://docs.spring.io/spring-boot/3.5.3/maven-plugin)
-* [Create an OCI image](https://docs.spring.io/spring-boot/3.5.3/maven-plugin/build-image.html)
-* [Spring Web](https://docs.spring.io/spring-boot/3.5.3/reference/web/servlet.html)
+[![Java](https://img.shields.io/badge/Java-21-red.svg)](https://www.java.com)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-API-green.svg)](https://spring.io/projects/spring-boot)
+[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-blue.svg)](https://www.postgresql.org/)
+[![Status](https://img.shields.io/badge/Status-Em%20Desenvolvimento-yellow.svg)](https://github.com/brunodeev/collab-todo)
 
-### Guides
-The following guides illustrate how to use some features concretely:
+---
 
-* [Building a RESTful Web Service](https://spring.io/guides/gs/rest-service/)
-* [Serving Web Content with Spring MVC](https://spring.io/guides/gs/serving-web-content/)
-* [Building REST services with Spring](https://spring.io/guides/tutorials/rest/)
+## ✨ Funcionalidades
 
-### Maven Parent overrides
+- ✅ Cadastro de usuários com **verificação por e-mail** e **criptografia de senha**
+- 🔐 Login seguro
+- 📝 Criação de **listas de tarefas (ToDo Lists)**
+- 📌 Criação e gerenciamento de **itens de tarefas**
+- 👥 Suporte a múltiplos usuários por lista *(em desenvolvimento)*
 
-Due to Maven's design, elements are inherited from the parent POM to the project POM.
-While most of the inheritance is fine, it also inherits unwanted elements like `<license>` and `<developers>` from the parent.
-To prevent this, the project POM contains empty overrides for these elements.
-If you manually switch to a different parent and actually want the inheritance, you need to remove those overrides.
+---
 
+## 🧠 Tecnologias Utilizadas
+
+| Tecnologia | Descrição |
+|------------|-----------|
+| Java 21+   | Linguagem principal do back-end |
+| Spring Boot | Framework para construção da API REST |
+| PostgreSQL | Banco de dados relacional (via Supabase) |
+| JavaMailSender | Envio de e-mails de confirmação |
+| Maven      | Gerenciador de dependências |
+
+---
+
+## 🛠️ Endpoints disponíveis (até o momento)
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `POST` | `/user` | Criação de usuário com envio de código por e-mail |
+| `POST` | `/user/activate` | Validação do código enviado por e-mail |
+| `GET` | `/user/login` | Login do usuário |
+| `POST` | `/todo-list` | Criação de uma nova lista de tarefas |
+| `POST` | `/todo-item` | Criação de uma nova tarefa vinculada a uma lista |
+
+---
+
+## 📨 Envio de E-mail
+
+Após o registro, um código de ativação é enviado automaticamente para o e-mail do usuário. Esse código deve ser usado para validar a conta antes do primeiro login. O envio é realizado com `JavaMailSender` e templates HTML personalizados.
+
+---
+
+## 💻 Como rodar localmente
+
+1. Clone o repositório:
+```bash
+git clone https://github.com/brunodeev/collab-todo.git
+cd collab-todo
