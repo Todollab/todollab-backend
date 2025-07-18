@@ -3,6 +3,7 @@ package com.bruno.collab_todo.controller;
 import com.bruno.collab_todo.model.User;
 import com.bruno.collab_todo.repository.UserRepository;
 import com.bruno.collab_todo.service.EmailService;
+import jakarta.mail.MessagingException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -28,7 +29,7 @@ public class UserController {
     }
 
     @PostMapping
-    public void registerUser(@RequestBody User user) {
+    public void registerUser(@RequestBody User user) throws MessagingException {
         Random random = new Random();
 
         int min = 1000;
@@ -36,7 +37,7 @@ public class UserController {
         int customRangeNumber = random.nextInt(max - min + 1) + min;
 
         code = customRangeNumber;
-        emailService.sendEmail(user.getEmail(), "Código de cadastro", customRangeNumber);
+        emailService.sendEmail(user.getEmail(), "Código de cadastro", user.getName(), customRangeNumber);
 
         String encodedPassword = new BCryptPasswordEncoder().encode(user.getPassword());
 
