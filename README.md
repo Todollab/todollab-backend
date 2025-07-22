@@ -55,3 +55,20 @@ Após o registro, um código de ativação é enviado automaticamente para o e-m
 ```bash
 git clone https://github.com/brunodeev/collab-todo.git
 cd collab-todo
+```
+2. Configuração de Variáveis de Ambiente
+
+Crie um arquivo `application-dev.properties` na pasta resource e altere as infos necessárias.
+```bash
+# Nome da aplicação
+SPRING_APPLICATION_NAME=collab-todo
+
+# Configurações de e-mail SMTP
+MAIL=sua_conta@gmail.com
+MAIL_PASSWORD=sua_senha_ou_token
+
+# Configurações do banco de dados
+DB_URL=jdbc:postgresql://seu_host:5432/seu_banco
+DB_USER=seu_usuario
+DB_PASSWORD=sua_senha
+```
