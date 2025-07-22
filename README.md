@@ -1,4 +1,4 @@
-# 📋 CollabTodo - Lista de Tarefas Colaborativa
+# 📋 Todollab - Lista de Tarefas Colaborativa
 
 Este é o **CollabTodo**, um sistema de gerenciamento de tarefas com foco na **colaboração em tempo real** entre usuários. Desenvolvido com **Java + Spring Boot** no back-end e banco de dados **PostgreSQL**, esse projeto é ideal para equipes que precisam organizar e compartilhar listas de afazeres.
 
