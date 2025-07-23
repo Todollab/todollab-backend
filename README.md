@@ -1,6 +1,6 @@
 # 📋 Todollab - Lista de Tarefas Colaborativa
 
-Este é o **CollabTodo**, um sistema de gerenciamento de tarefas com foco na **colaboração em tempo real** entre usuários. Desenvolvido com **Java + Spring Boot** no back-end e banco de dados **PostgreSQL**, esse projeto é ideal para equipes que precisam organizar e compartilhar listas de afazeres.
+Este é o **Todollab**, um sistema de gerenciamento de tarefas com foco na **colaboração em tempo real** entre usuários. Desenvolvido com **Java + Spring Boot** no back-end e banco de dados **PostgreSQL**, esse projeto é ideal para equipes que precisam organizar e compartilhar listas de afazeres.
 
 [![Java](https://img.shields.io/badge/Java-21-red.svg)](https://www.java.com)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-API-green.svg)](https://spring.io/projects/spring-boot)
