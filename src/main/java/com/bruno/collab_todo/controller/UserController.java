@@ -29,7 +29,10 @@ public class UserController {
     }
 
     @PostMapping
-    public void registerUser(@RequestBody User user) throws MessagingException {
+    public ResponseEntity<?> registerUser(@RequestBody User user) throws MessagingException {
+
+        if (repository.findByEmail(user.getEmail()).isPresent()) return ResponseEntity.status(400).build();
+
         Random random = new Random();
 
         int min = 1000;
@@ -44,6 +47,8 @@ public class UserController {
         user.setPassword(encodedPassword);
 
         repository.save(user);
+
+        return ResponseEntity.status(201).body(user);
     }
 
     @PostMapping("/activate")
@@ -80,7 +85,7 @@ public class UserController {
 
             return matchPassword
                     ? ResponseEntity.ok(user.get())
-                    : ResponseEntity.badRequest().body("Credenciais inválidas");
+                    : ResponseEntity.status(403).build();
         } else {
             return ResponseEntity.badRequest().body("Credenciais inválidas");
         }

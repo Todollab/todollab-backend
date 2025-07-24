@@ -16,10 +16,12 @@ public class EmailService {
 
     public void sendEmail(String toEmail, String subject, String name, int code) throws MessagingException {
 
+        String[] firstName = name.split(" ");
+
         MimeMessage message = mailSender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(message, true);
 
-        helper.setFrom("bcgmeireles@gmail.com");
+        helper.setFrom("todollab@gmail.com");
         helper.setTo(toEmail);
         helper.setSubject(subject);
 
@@ -35,7 +37,7 @@ public class EmailService {
                         </div>
                     </body>
                 </html>
-                """.formatted(name, code);
+                """.formatted(firstName[0], code);
 
         helper.setText(htmlContent, true);
 
