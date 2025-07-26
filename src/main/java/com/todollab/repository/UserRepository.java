@@ -1,6 +1,6 @@
-package com.bruno.collab_todo.repository;
+package com.todollab.repository;
 
-import com.bruno.collab_todo.model.User;
+import com.todollab.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;

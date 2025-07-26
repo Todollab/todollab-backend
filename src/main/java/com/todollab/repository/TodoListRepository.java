@@ -1,6 +1,6 @@
-package com.bruno.collab_todo.repository;
+package com.todollab.repository;
 
-import com.bruno.collab_todo.model.TodoList;
+import com.todollab.model.TodoList;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.UUID;

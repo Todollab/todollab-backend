@@ -1,10 +1,10 @@
-package com.bruno.collab_todo.controller;
+package com.todollab.controller;
 
-import com.bruno.collab_todo.dto.TodoItemDTO;
-import com.bruno.collab_todo.model.TodoItem;
-import com.bruno.collab_todo.model.TodoList;
-import com.bruno.collab_todo.repository.TodoItemRepository;
-import com.bruno.collab_todo.repository.TodoListRepository;
+import com.todollab.dto.TodoItemDTO;
+import com.todollab.model.TodoItem;
+import com.todollab.model.TodoList;
+import com.todollab.repository.TodoItemRepository;
+import com.todollab.repository.TodoListRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;

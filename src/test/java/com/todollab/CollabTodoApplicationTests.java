@@ -1,4 +1,4 @@
-package com.bruno.collab_todo;
+package com.todollab;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

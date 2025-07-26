@@ -1,4 +1,4 @@
-package com.bruno.collab_todo.model;
+package com.todollab.model;
 
 import jakarta.persistence.*;
 import lombok.Data;

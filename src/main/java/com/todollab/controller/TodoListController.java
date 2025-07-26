@@ -1,7 +1,7 @@
-package com.bruno.collab_todo.controller;
+package com.todollab.controller;
 
-import com.bruno.collab_todo.model.TodoList;
-import com.bruno.collab_todo.repository.TodoListRepository;
+import com.todollab.model.TodoList;
+import com.todollab.repository.TodoListRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;

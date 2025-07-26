@@ -1,4 +1,4 @@
-package com.bruno.collab_todo.model;
+package com.todollab.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;

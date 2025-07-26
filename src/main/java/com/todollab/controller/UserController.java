@@ -1,8 +1,8 @@
-package com.bruno.collab_todo.controller;
+package com.todollab.controller;
 
-import com.bruno.collab_todo.model.User;
-import com.bruno.collab_todo.repository.UserRepository;
-import com.bruno.collab_todo.service.EmailService;
+import com.todollab.model.User;
+import com.todollab.repository.UserRepository;
+import com.todollab.service.EmailService;
 import jakarta.mail.MessagingException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;

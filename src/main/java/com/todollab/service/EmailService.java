@@ -1,4 +1,4 @@
-package com.bruno.collab_todo.service;
+package com.todollab.service;
 
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;

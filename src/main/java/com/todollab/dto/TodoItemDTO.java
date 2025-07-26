@@ -1,4 +1,4 @@
-package com.bruno.collab_todo.dto;
+package com.todollab.dto;
 
 import java.util.UUID;
 
