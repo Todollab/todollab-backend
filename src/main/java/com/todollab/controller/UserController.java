@@ -1,11 +1,16 @@
 package com.todollab.controller;
 
+import com.todollab.dto.LoginRequestDTO;
+import com.todollab.dto.RegisterDTO;
 import com.todollab.model.User;
 import com.todollab.repository.UserRepository;
 import com.todollab.service.EmailService;
+import com.todollab.service.TokenService;
 import jakarta.mail.MessagingException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +26,12 @@ public class UserController {
     @Autowired
     private EmailService emailService;
 
+    @Autowired
+    private TokenService tokenService;
+
+    @Autowired
+    private AuthenticationManager authenticationManager;
+
     int code = 0;
 
     @GetMapping
@@ -29,9 +40,11 @@ public class UserController {
     }
 
     @PostMapping
-    public ResponseEntity<?> registerUser(@RequestBody User user) throws MessagingException {
+    public ResponseEntity<?> registerUser(@RequestBody RegisterDTO data) throws MessagingException {
 
-        if (repository.findByEmail(user.getEmail()).isPresent()) return ResponseEntity.status(400).build();
+        if (data.email() == null || this.repository.findByEmail(data.email()).isPresent()) {
+            return ResponseEntity.status(400).build();
+        }
 
         Random random = new Random();
 
@@ -40,15 +53,15 @@ public class UserController {
         int customRangeNumber = random.nextInt(max - min + 1) + min;
 
         code = customRangeNumber;
-        emailService.sendEmail(user.getEmail(), "Código de cadastro", user.getName(), customRangeNumber);
+        emailService.sendEmail(data.email(), "Código de cadastro", data.name(), customRangeNumber);
 
-        String encodedPassword = new BCryptPasswordEncoder().encode(user.getPassword());
+        String encodedPassword = new BCryptPasswordEncoder().encode(data.password());
 
-        user.setPassword(encodedPassword);
+        User newUser = new User(data.name(), data.email(), encodedPassword);
 
-        repository.save(user);
+        repository.save(newUser);
 
-        return ResponseEntity.status(201).body(user);
+        return ResponseEntity.status(201).body(newUser);
     }
 
     @PostMapping("/activate")
@@ -73,21 +86,21 @@ public class UserController {
         }
     }
 
-    @GetMapping("/login")
-    public ResponseEntity<?> loginUser(@RequestBody Map<String, String> body) {
-        String email = body.get("email");
-        String password = body.get("password");
+    @PostMapping("/login")
+    public ResponseEntity<?> loginUser(@RequestBody LoginRequestDTO data) {
+        var usernamePassword = new UsernamePasswordAuthenticationToken(
+                data.email(),
+                data.password()
+        );
+        var auth = this.authenticationManager.authenticate(usernamePassword);
 
-        Optional<User> user = repository.findByEmail(email);
+        var user = (User) auth.getPrincipal();
+        var token = tokenService.generateToken(user);
 
-        if (user.isPresent()) {
-            boolean matchPassword = new BCryptPasswordEncoder().matches(password, user.get().getPassword());
+        Map<String, Object> response = new HashMap<>();
+        response.put("token", token);
+        response.put("user", user);
 
-            return matchPassword
-                    ? ResponseEntity.ok(user.get())
-                    : ResponseEntity.status(403).build();
-        } else {
-            return ResponseEntity.badRequest().body("Credenciais inválidas");
-        }
+        return ResponseEntity.ok(response);
     }
 }
