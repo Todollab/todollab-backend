@@ -1,43 +1,32 @@
 package com.todollab.controller;
 
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.todollab.dto.TodoItemDTO;
 import com.todollab.model.TodoItem;
-import com.todollab.model.TodoList;
-import com.todollab.repository.TodoItemRepository;
-import com.todollab.repository.TodoListRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-
-import java.time.OffsetDateTime;
-import java.util.Optional;
+import com.todollab.service.TodoItemService;
 
 @RequestMapping("/todo-item")
 @RestController
 public class TodoItemController {
 
-    @Autowired
-    private TodoItemRepository todoItemRepository;
+    private final TodoItemService todoItemService;
 
-    @Autowired
-    private TodoListRepository todoListRepository;
+    public TodoItemController(TodoItemService todoItemService) {
+        this.todoItemService = todoItemService;
+    }
 
     @PostMapping
     public ResponseEntity<?> createTodoItem(@RequestBody TodoItemDTO dto) {
-        Optional<TodoList> list = todoListRepository.findById(dto.todoListId);
-
-        if (list.isEmpty()) {
-            return ResponseEntity.badRequest().body("Todo list não encontrada");
+        try {
+            TodoItem item = todoItemService.createTodoItem(dto);
+            return ResponseEntity.ok(item);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
         }
-
-        TodoItem item = new TodoItem();
-        item.setContent(dto.content);
-        item.setTodoList(list.get());
-        item.setDone(false);
-        item.setCreated_at(OffsetDateTime.now());
-        item.setUpdated_at(OffsetDateTime.now());
-
-        todoItemRepository.save(item);
-        return ResponseEntity.ok(item);
     }
 }

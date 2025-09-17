@@ -1,26 +1,27 @@
 package com.todollab.controller;
 
-import com.todollab.model.TodoList;
-import com.todollab.repository.TodoListRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.OffsetDateTime;
+import com.todollab.model.TodoList;
+import com.todollab.service.TodoListService;
 
 @RequestMapping("/todo-list")
 @RestController
 public class TodoListController {
 
-    @Autowired
-    private TodoListRepository repository;
+    private final TodoListService todoListService;
+
+    public TodoListController(TodoListService todoListService) {
+        this.todoListService = todoListService;
+    }
 
     @PostMapping
     public ResponseEntity<TodoList> createTodoList(@RequestBody TodoList todoList) {
-        todoList.setCreated_at(OffsetDateTime.now());
-        return ResponseEntity.ok(repository.save(todoList));
+        TodoList list = todoListService.createTodoList(todoList);
+        return ResponseEntity.ok(list);
     }
 }
