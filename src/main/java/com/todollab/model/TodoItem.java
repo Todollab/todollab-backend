@@ -6,6 +6,8 @@ import lombok.Data;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+
 @Entity
 @Data
 @Table(name = "todo_items")
@@ -17,6 +19,7 @@ public class TodoItem {
 
     @ManyToOne
     @JoinColumn(name = "todo_list_id", nullable = false)
+    @JsonBackReference
     private TodoList todoList;
 
     private String content;

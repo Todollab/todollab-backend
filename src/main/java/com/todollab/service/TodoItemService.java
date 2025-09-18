@@ -1,6 +1,7 @@
 package com.todollab.service;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
@@ -22,7 +23,7 @@ public class TodoItemService {
 
     public TodoItem createTodoItem(TodoItemDTO dto) {
         TodoList todoList = todoListRepository.findById(dto.todoListId)
-            .orElseThrow(() -> new IllegalArgumentException("Todo list não encontrada"));
+            .orElseThrow(() -> new IllegalArgumentException("Todo List não encontrada"));
 
         TodoItem item = new TodoItem();
         item.setContent(dto.content);
@@ -32,5 +33,12 @@ public class TodoItemService {
         item.setUpdated_at(OffsetDateTime.now());
 
         return todoItemRepository.save(item);
+    }
+
+    public void deleteTodoItem(UUID todoItemId) {
+        TodoItem item = todoItemRepository.findById(todoItemId)
+            .orElseThrow(() -> new IllegalArgumentException("Todo item não encontrado"));
+
+        todoItemRepository.delete(item);
     }
 }
