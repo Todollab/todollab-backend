@@ -1,4 +1,8 @@
+# =========================
+# Build e IDE
+# =========================
 target/
+build/
 .mvn/
 !**/src/main/**/target/
 !**/src/test/**/target/
@@ -24,11 +28,17 @@ target/
 /dist/
 /nbdist/
 /.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
 
 ### VS Code ###
 .vscode/
 
+# =========================
+# Credenciais locais
+# =========================
+# Ignora os properties reais de dev/prod
 /src/main/resources/application-dev.properties
+
+# =========================
+# Mantém templates versionados
+# =========================
+!/src/main/resources/application-dev-template.properties
