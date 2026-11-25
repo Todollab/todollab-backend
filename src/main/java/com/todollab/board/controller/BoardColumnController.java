@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -65,9 +66,11 @@ public class BoardColumnController {
     public ResponseEntity<Void> deleteColumn(
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable UUID boardId,
-            @PathVariable UUID columnId
+            @PathVariable UUID columnId,
+            @RequestParam(required = false) UUID targetColumnId,
+            @RequestParam(defaultValue = "false") boolean deleteTasks
     ) {
-        boardColumnService.deleteColumn(boardId, principal.id(), columnId);
+        boardColumnService.deleteColumn(boardId, principal.id(), columnId, targetColumnId, deleteTasks);
         return ResponseEntity.noContent().build();
     }
 }

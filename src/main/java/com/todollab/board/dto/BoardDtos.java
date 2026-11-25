@@ -7,6 +7,8 @@ import com.todollab.board.model.BoardColumn;
 import com.todollab.board.model.BoardMember;
 import com.todollab.board.model.BoardRole;
 import com.todollab.board.model.BoardView;
+import com.todollab.task.dto.TaskDtos.TagResponse;
+import com.todollab.task.dto.TaskDtos.TaskResponse;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -129,8 +131,8 @@ public final class BoardDtos {
             BoardRole myRole,
             @JsonProperty("isFavorite") boolean isFavorite,
             List<ColumnResponse> columns,
-            List<Object> tasks,
-            List<Object> tags,
+            List<TaskResponse> tasks,
+            List<TagResponse> tags,
             List<BoardMemberResponse> members
     ) {
     }

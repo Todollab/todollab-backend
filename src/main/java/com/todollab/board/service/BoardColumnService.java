@@ -10,6 +10,8 @@ import com.todollab.board.repository.BoardColumnRepository;
 import com.todollab.common.exception.ApiException;
 import com.todollab.common.exception.ErrorCode;
 import com.todollab.common.util.PositionService;
+import com.todollab.task.model.Task;
+import com.todollab.task.repository.TaskRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,13 +28,16 @@ public class BoardColumnService {
 
     private final BoardColumnRepository boardColumnRepository;
     private final BoardAccessService boardAccessService;
+    private final TaskRepository taskRepository;
 
     public BoardColumnService(
             BoardColumnRepository boardColumnRepository,
-            BoardAccessService boardAccessService
+            BoardAccessService boardAccessService,
+            TaskRepository taskRepository
     ) {
         this.boardColumnRepository = boardColumnRepository;
         this.boardAccessService = boardAccessService;
+        this.taskRepository = taskRepository;
     }
 
     @Transactional
@@ -118,9 +123,9 @@ public class BoardColumnService {
     }
 
     @Transactional
-    public void deleteColumn(UUID boardId, UUID userId, UUID columnId) {
+    public void deleteColumn(UUID boardId, UUID userId, UUID columnId, UUID targetColumnId, boolean deleteTasks) {
         boardAccessService.requireEditor(boardId, userId);
-        BoardColumn column = findColumnOrThrow(columnId, boardId);
+        findColumnOrThrow(columnId, boardId);
 
         if (boardColumnRepository.countByBoardId(boardId) <= 1) {
             throw new ApiException(
@@ -130,8 +135,57 @@ public class BoardColumnService {
             );
         }
 
-        boardColumnRepository.delete(column);
-        boardColumnRepository.flush();
+        if (targetColumnId != null && deleteTasks) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.VALIDATION_ERROR,
+                    "Informe apenas targetColumnId ou deleteTasks=true, não ambos."
+            );
+        }
+
+        long taskCount = taskRepository.countByColumnId(columnId);
+        if (taskCount > 0) {
+            if (targetColumnId != null) {
+                if (targetColumnId.equals(columnId)) {
+                    throw new ApiException(
+                            HttpStatus.BAD_REQUEST,
+                            ErrorCode.VALIDATION_ERROR,
+                            "A coluna de destino deve ser diferente da coluna excluída."
+                    );
+                }
+                BoardColumn targetColumn = findColumnOrThrow(targetColumnId, boardId);
+                List<Task> tasksToMigrate = taskRepository.findAllByColumnIdOrderByPositionAsc(columnId);
+                double nextPos = PositionService.appendPosition(taskRepository.findMaxPositionByColumnId(targetColumnId));
+                OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+
+                for (Task task : tasksToMigrate) {
+                    task.setColumn(targetColumn);
+                    task.setPosition(nextPos);
+                    nextPos += PositionService.DEFAULT_STEP;
+                    if (targetColumn.isDoneColumn()) {
+                        task.setCompleted(true);
+                        if (task.getCompletedAt() == null) {
+                            task.setCompletedAt(now);
+                        }
+                    } else {
+                        task.setCompleted(false);
+                        task.setCompletedAt(null);
+                    }
+                    task.setUpdatedAt(now);
+                }
+                taskRepository.saveAllAndFlush(tasksToMigrate);
+            } else if (deleteTasks) {
+                taskRepository.deleteAllByColumnId(columnId);
+            } else {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        ErrorCode.COLUMN_NOT_EMPTY,
+                        "A coluna possui tarefas. Mova as tarefas para outra coluna ou confirme a exclusão."
+                );
+            }
+        }
+
+        boardColumnRepository.deleteColumnByIdAndBoardId(columnId, boardId);
     }
 
     private BoardColumn findColumnOrThrow(UUID columnId, UUID boardId) {

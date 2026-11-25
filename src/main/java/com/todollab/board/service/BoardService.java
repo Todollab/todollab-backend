@@ -21,12 +21,18 @@ import com.todollab.board.repository.BoardMemberRepository;
 import com.todollab.board.repository.BoardRepository;
 import com.todollab.common.exception.ApiException;
 import com.todollab.common.exception.ErrorCode;
+import com.todollab.task.dto.TaskDtos.TagResponse;
+import com.todollab.task.dto.TaskDtos.TaskResponse;
+import com.todollab.task.repository.TaskRepository;
+import com.todollab.task.service.BoardTagService;
+import com.todollab.task.service.TaskService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -42,19 +48,28 @@ public class BoardService {
     private final BoardColumnRepository boardColumnRepository;
     private final UserRepository userRepository;
     private final BoardAccessService boardAccessService;
+    private final TaskRepository taskRepository;
+    private final TaskService taskService;
+    private final BoardTagService boardTagService;
 
     public BoardService(
             BoardRepository boardRepository,
             BoardMemberRepository boardMemberRepository,
             BoardColumnRepository boardColumnRepository,
             UserRepository userRepository,
-            BoardAccessService boardAccessService
+            BoardAccessService boardAccessService,
+            TaskRepository taskRepository,
+            TaskService taskService,
+            BoardTagService boardTagService
     ) {
         this.boardRepository = boardRepository;
         this.boardMemberRepository = boardMemberRepository;
         this.boardColumnRepository = boardColumnRepository;
         this.userRepository = userRepository;
         this.boardAccessService = boardAccessService;
+        this.taskRepository = taskRepository;
+        this.taskService = taskService;
+        this.boardTagService = boardTagService;
     }
 
     @Transactional(readOnly = true)
@@ -73,6 +88,19 @@ public class BoardService {
                 .stream()
                 .collect(Collectors.groupingBy(m -> m.getBoard().getId()));
 
+        Map<UUID, long[]> taskCountsByBoardId = new HashMap<>();
+        for (Object[] row : taskRepository.countTasksGroupedByBoardAndCompleted(boardIds)) {
+            UUID boardId = (UUID) row[0];
+            boolean completed = (Boolean) row[1];
+            long count = ((Number) row[2]).longValue();
+            long[] counts = taskCountsByBoardId.computeIfAbsent(boardId, ignored -> new long[2]);
+            if (completed) {
+                counts[1] += count;
+            } else {
+                counts[0] += count;
+            }
+        }
+
         return memberships.stream()
                 .map(membership -> {
                     Board board = membership.getBoard();
@@ -81,6 +109,7 @@ public class BoardService {
                             .limit(PREVIEW_LIMIT)
                             .map(m -> MemberPreview.from(m.getUser()))
                             .toList();
+                    long[] counts = taskCountsByBoardId.getOrDefault(board.getId(), new long[2]);
 
                     return new BoardSummaryResponse(
                             board.getId(),
@@ -92,8 +121,8 @@ public class BoardService {
                             membership.getRole(),
                             membership.isFavorite(),
                             boardMembers.size(),
-                            0L,
-                            0L,
+                            counts[0],
+                            counts[1],
                             preview,
                             board.getCreatedAt(),
                             board.getUpdatedAt()
@@ -161,13 +190,16 @@ public class BoardService {
                 .map(BoardMemberResponse::from)
                 .toList();
 
+        List<TaskResponse> tasks = taskService.listTasksForBoard(boardId);
+        List<TagResponse> tags = boardTagService.listTagsForBoard(boardId);
+
         return new BoardDetailResponse(
                 BoardResponse.from(board),
                 membership.getRole(),
                 membership.isFavorite(),
                 columns,
-                List.of(),
-                List.of(),
+                tasks,
+                tags,
                 members
         );
     }
