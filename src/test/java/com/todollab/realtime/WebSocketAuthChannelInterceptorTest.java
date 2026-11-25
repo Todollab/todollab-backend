@@ -1,5 +1,6 @@
 package com.todollab.realtime;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.todollab.auth.model.User;
 import com.todollab.auth.repository.UserRepository;
 import com.todollab.auth.security.UserPrincipal;
@@ -13,15 +14,20 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
+import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -166,6 +172,116 @@ class WebSocketAuthChannelInterceptorTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(boardMemberRepository);
+    }
+
+    @Test
+    void stomp12HandshakeFrameAuthenticatesValidTokenAndRejectsInvalidToken() {
+        Message<byte[]> missingHeader = stompMessage(StompCommand.STOMP, null, null, null);
+        assertThatThrownBy(() -> interceptor.preSend(missingHeader, messageChannel))
+                .isInstanceOf(AccessDeniedException.class);
+
+        UUID userId = UUID.randomUUID();
+        User activeUser = createUser(userId, "Alice Silva", "alice@example.com", true);
+        when(tokenService.parseAccessToken("valid.stomp.token"))
+                .thenReturn(Optional.of(new TokenClaims(userId, "alice@example.com")));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(activeUser));
+
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.STOMP);
+        accessor.setNativeHeader("Authorization", "Bearer valid.stomp.token");
+        accessor.setSessionId("stomp-session-1");
+        accessor.setLeaveMutable(true);
+        Message<byte[]> validStomp = MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
+
+        Message<?> result = interceptor.preSend(validStomp, messageChannel);
+        assertThat(result).isNotNull();
+        StompHeaderAccessor resultAccessor = MessageHeaderAccessor.getAccessor(result, StompHeaderAccessor.class);
+        assertThat(resultAccessor).isNotNull();
+        assertThat(resultAccessor.getUser()).isInstanceOf(UsernamePasswordAuthenticationToken.class);
+    }
+
+    @Test
+    void sendCommandIsRejectedWithAccessDenied() {
+        UUID userId = UUID.randomUUID();
+        UUID boardId = UUID.randomUUID();
+        UserPrincipal principal = new UserPrincipal(userId, "alice@example.com", "Alice Silva", true);
+        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(principal, null, List.of());
+
+        Message<byte[]> authenticatedSend = stompMessage(StompCommand.SEND, null, "/topic/boards/" + boardId, auth);
+        assertThatThrownBy(() -> interceptor.preSend(authenticatedSend, messageChannel))
+                .isInstanceOf(AccessDeniedException.class);
+
+        Message<byte[]> unauthenticatedSend = stompMessage(StompCommand.SEND, null, "/topic/boards/" + boardId, null);
+        assertThatThrownBy(() -> interceptor.preSend(unauthenticatedSend, messageChannel))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(boardMemberRepository);
+    }
+
+    @Test
+    void outboundMessageDroppedForRemovedMemberExceptSelfRemovalAndBoardDeleted() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID otherUserId = UUID.randomUUID();
+        UUID boardId = UUID.randomUUID();
+        String sessionId = "ws-session-42";
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+
+        User activeUser = createUser(userId, "Bruno Editor", "bruno@example.com", true);
+        when(tokenService.parseAccessToken("member.jwt"))
+                .thenReturn(Optional.of(new TokenClaims(userId, "bruno@example.com")));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(activeUser));
+
+        StompHeaderAccessor connectAccessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        connectAccessor.setSessionId(sessionId);
+        connectAccessor.setNativeHeader("Authorization", "Bearer member.jwt");
+        connectAccessor.setLeaveMutable(true);
+        interceptor.preSend(MessageBuilder.createMessage(new byte[0], connectAccessor.getMessageHeaders()), messageChannel);
+
+        ChannelInterceptor outbound = interceptor.outboundChannelInterceptor();
+        String destination = "/topic/boards/" + boardId;
+
+        byte[] taskCreatedBytes = mapper.writeValueAsString(
+                BoardEvent.of(BoardEventType.TASK_CREATED, boardId, otherUserId, Map.of("title", "Secret"))
+        ).getBytes(StandardCharsets.UTF_8);
+
+        when(boardMemberRepository.existsByBoardIdAndUserId(boardId, userId)).thenReturn(true);
+        Message<byte[]> allowedTaskMessage = outboundBrokerMessage(sessionId, destination, taskCreatedBytes);
+        assertThat(outbound.preSend(allowedTaskMessage, messageChannel)).isSameAs(allowedTaskMessage);
+
+        when(boardMemberRepository.existsByBoardIdAndUserId(boardId, userId)).thenReturn(false);
+        Message<byte[]> droppedTaskMessage = outboundBrokerMessage(sessionId, destination, taskCreatedBytes);
+        assertThat(outbound.preSend(droppedTaskMessage, messageChannel)).isNull();
+
+        byte[] selfRemovedBytes = mapper.writeValueAsString(
+                BoardEvent.of(BoardEventType.MEMBER_CHANGED, boardId, otherUserId,
+                        Map.of("action", "REMOVED", "removedUserId", userId))
+        ).getBytes(StandardCharsets.UTF_8);
+        Message<byte[]> allowedSelfRemoval = outboundBrokerMessage(sessionId, destination, selfRemovedBytes);
+        assertThat(outbound.preSend(allowedSelfRemoval, messageChannel)).isSameAs(allowedSelfRemoval);
+
+        byte[] otherRoleChangedBytes = mapper.writeValueAsString(
+                BoardEvent.of(BoardEventType.MEMBER_CHANGED, boardId, otherUserId,
+                        Map.of("action", "ROLE_UPDATED", "member", Map.of("userId", otherUserId)))
+        ).getBytes(StandardCharsets.UTF_8);
+        Message<byte[]> droppedOtherMemberChange = outboundBrokerMessage(sessionId, destination, otherRoleChangedBytes);
+        assertThat(outbound.preSend(droppedOtherMemberChange, messageChannel)).isNull();
+
+        byte[] boardDeletedBytes = mapper.writeValueAsString(
+                BoardEvent.of(BoardEventType.BOARD_DELETED, boardId, otherUserId, Map.of("boardId", boardId))
+        ).getBytes(StandardCharsets.UTF_8);
+        Message<byte[]> allowedBoardDeleted = outboundBrokerMessage(sessionId, destination, boardDeletedBytes);
+        assertThat(outbound.preSend(allowedBoardDeleted, messageChannel)).isSameAs(allowedBoardDeleted);
+
+        Message<byte[]> unknownSessionMessage = outboundBrokerMessage("unknown-session", destination, taskCreatedBytes);
+        assertThat(outbound.preSend(unknownSessionMessage, messageChannel)).isNull();
+    }
+
+    private Message<byte[]> outboundBrokerMessage(String sessionId, String destination, byte[] payload) {
+        SimpMessageHeaderAccessor accessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+        accessor.setSessionId(sessionId);
+        accessor.setDestination(destination);
+        accessor.setLeaveMutable(true);
+        return MessageBuilder.createMessage(payload, accessor.getMessageHeaders());
     }
 
     private Message<byte[]> stompMessage(

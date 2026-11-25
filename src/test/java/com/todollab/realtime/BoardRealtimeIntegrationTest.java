@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -40,6 +41,8 @@ import org.springframework.messaging.simp.user.SimpUserRegistry;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
@@ -84,6 +87,12 @@ class BoardRealtimeIntegrationTest {
 
     @Autowired
     private SimpUserRegistry simpUserRegistry;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private ApplicationEventPublisher applicationEventPublisher;
 
     @MockitoBean
     private JavaMailSender javaMailSender;
@@ -575,8 +584,47 @@ class BoardRealtimeIntegrationTest {
 
         try {
             outsiderSession.subscribe("/topic/boards/" + boardId, new BoardEventFrameHandler(outsiderEvents));
-            // Give server a moment to reject outsider's SUBSCRIBE frame
-            Thread.sleep(300);
+            // Server actively rejects unauthorized SUBSCRIBE frame with STOMP ERROR / disconnect
+            outsiderError.get(5, TimeUnit.SECONDS);
+
+            // Authenticated member attempting STOMP SEND injection into /topic/boards/{boardId} is rejected
+            CompletableFuture<Void> attackerError = new CompletableFuture<>();
+            StompHeaders attackerHeaders = new StompHeaders();
+            attackerHeaders.add(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken);
+            StompSession attackerSession = stompClient.connectAsync(
+                    "ws://localhost:" + port + "/ws",
+                    new WebSocketHttpHeaders(),
+                    attackerHeaders,
+                    new StompSessionHandlerAdapter() {
+                        @Override
+                        public void handleException(
+                                StompSession session,
+                                StompCommand command,
+                                StompHeaders headers,
+                                byte[] payload,
+                                Throwable exception
+                        ) {
+                            attackerError.complete(null);
+                        }
+
+                        @Override
+                        public void handleTransportError(StompSession session, Throwable exception) {
+                            attackerError.complete(null);
+                        }
+                    }
+            ).get(5, TimeUnit.SECONDS);
+            try {
+                attackerSession.send(
+                        "/topic/boards/" + boardId,
+                        BoardEvent.of(BoardEventType.TASK_CREATED, boardId, outsider.getId(), Map.of("spoof", true))
+                );
+                attackerError.get(5, TimeUnit.SECONDS);
+                assertThat(ownerEvents.poll(400, TimeUnit.MILLISECONDS)).isNull();
+            } finally {
+                if (attackerSession.isConnected()) {
+                    attackerSession.disconnect();
+                }
+            }
 
             // Failed mutation (invalid assigneeId) must NOT emit an event
             ResponseEntity<String> failedTaskResp = restTemplate.exchange(
@@ -590,6 +638,19 @@ class BoardRealtimeIntegrationTest {
                     boardId
             );
             assertThat(failedTaskResp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(ownerEvents.poll(400, TimeUnit.MILLISECONDS)).isNull();
+
+            // True post-publish rollback: publishEvent inside a transaction that rolls back afterwards MUST NOT emit
+            TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+            assertThatThrownBy(() -> txTemplate.executeWithoutResult(status -> {
+                applicationEventPublisher.publishEvent(BoardDomainEvent.of(
+                        BoardEventType.BOARD_UPDATED,
+                        boardId,
+                        owner.getId(),
+                        Map.of("name", "Rolled Back")
+                ));
+                throw new IllegalStateException("Forced rollback after publishEvent");
+            })).isInstanceOf(IllegalStateException.class);
             assertThat(ownerEvents.poll(400, TimeUnit.MILLISECONDS)).isNull();
 
             // Successful mutation reaches owner, never outsider
@@ -606,6 +667,81 @@ class BoardRealtimeIntegrationTest {
         } finally {
             if (outsiderSession.isConnected()) {
                 outsiderSession.disconnect();
+            }
+            if (ownerSession.isConnected()) {
+                ownerSession.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void removedMemberReceivesSelfRemovalNotificationAndStopsReceivingSubsequentEvents() throws Exception {
+        User owner = createActiveUser("Alice Dona", "alice@example.com");
+        User member = createActiveUser("Bruno Editor", "bruno@example.com");
+        String ownerToken = tokenService.generateAccessToken(owner);
+        String memberToken = tokenService.generateAccessToken(member);
+
+        BoardDetailResponse createdBoard = createBoard(ownerToken, "Quadro Remoção");
+        UUID boardId = createdBoard.board().id();
+
+        ResponseEntity<JsonNode> inviteResp = restTemplate.exchange(
+                "/api/v1/boards/{boardId}/invites/email",
+                HttpMethod.POST,
+                new HttpEntity<>(Map.of("email", "bruno@example.com", "role", "EDITOR"), authHeaders(ownerToken)),
+                JsonNode.class,
+                boardId
+        );
+        assertThat(inviteResp.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        String inviteToken = inviteResp.getBody().get("token").asText();
+
+        ResponseEntity<JsonNode> acceptResp = restTemplate.exchange(
+                "/api/v1/invites/{token}/accept",
+                HttpMethod.POST,
+                new HttpEntity<>(authHeaders(memberToken)),
+                JsonNode.class,
+                inviteToken
+        );
+        assertThat(acceptResp.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        BlockingQueue<BoardEvent> ownerEvents = new LinkedBlockingQueue<>();
+        BlockingQueue<BoardEvent> memberEvents = new LinkedBlockingQueue<>();
+        StompSession ownerSession = connectAndSubscribe(ownerToken, owner.getEmail(), boardId, ownerEvents);
+        StompSession memberSession = connectAndSubscribe(memberToken, member.getEmail(), boardId, memberEvents);
+
+        try {
+            // Owner removes Bruno while Bruno's STOMP subscription stays open
+            ResponseEntity<Void> removeResp = restTemplate.exchange(
+                    "/api/v1/boards/{boardId}/members/{userId}",
+                    HttpMethod.DELETE,
+                    new HttpEntity<>(authHeaders(ownerToken)),
+                    Void.class,
+                    boardId,
+                    member.getId()
+            );
+            assertThat(removeResp.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+            BoardEvent ownerRemovalEvent = pollEventOfType(ownerEvents, BoardEventType.MEMBER_CHANGED);
+            assertThat(ownerRemovalEvent.boardId()).isEqualTo(boardId);
+
+            // Removed member still receives their self-removal notification
+            BoardEvent memberRemovalEvent = pollEventOfType(memberEvents, BoardEventType.MEMBER_CHANGED);
+            Map<?, ?> memberRemovalPayload = objectMapper.convertValue(memberRemovalEvent.payload(), Map.class);
+            assertThat(memberRemovalPayload.get("removedUserId")).isEqualTo(member.getId().toString());
+
+            // Subsequent board task creation is received by owner, but dropped for the already-removed member
+            ResponseEntity<TaskResponse> taskResp = restTemplate.exchange(
+                    "/api/v1/boards/{boardId}/tasks",
+                    HttpMethod.POST,
+                    new HttpEntity<>(Map.of("title", "Tarefa Privada Pós-Remoção"), authHeaders(ownerToken)),
+                    TaskResponse.class,
+                    boardId
+            );
+            assertThat(taskResp.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            assertThat(pollEventOfType(ownerEvents, BoardEventType.TASK_CREATED)).isNotNull();
+            assertThat(memberEvents.poll(500, TimeUnit.MILLISECONDS)).isNull();
+        } finally {
+            if (memberSession.isConnected()) {
+                memberSession.disconnect();
             }
             if (ownerSession.isConnected()) {
                 ownerSession.disconnect();
