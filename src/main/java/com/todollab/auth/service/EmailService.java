@@ -103,7 +103,7 @@ public class EmailService {
                 </p>
                 """.formatted(safeInviter, safeBoard, safeRole, safeUrl, safeUrl, safeUrl);
 
-        sendHtmlEmail(toEmail, "Todollab — Convite para o quadro " + boardName, wrapLayout(body));
+        sendHtmlEmail(toEmail, "Todollab — Convite para o quadro " + sanitizeHeaderValue(boardName), wrapLayout(body));
     }
 
     private void sendHtmlEmail(String toEmail, String subject, String htmlContent) {
@@ -142,6 +142,13 @@ public class EmailService {
                 </body>
                 </html>
                 """.formatted(innerHtml);
+    }
+
+    private String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\r", "").replace("\n", "");
     }
 
     private String extractFirstName(String fullName) {

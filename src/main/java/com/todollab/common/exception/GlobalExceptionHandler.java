@@ -3,6 +3,7 @@ package com.todollab.common.exception;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSourceResolvable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -122,6 +123,16 @@ public class GlobalExceptionHandler {
                 HttpStatus.FORBIDDEN,
                 ErrorCode.FORBIDDEN_ROLE,
                 "Você não tem permissão para executar esta ação."
+        );
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        log.warn("Data integrity violation", ex);
+        return buildProblem(
+                HttpStatus.CONFLICT,
+                ErrorCode.CONFLICT,
+                "Conflito de dados: o registro já existe ou viola uma restrição de integridade."
         );
     }
 

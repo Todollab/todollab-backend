@@ -7,6 +7,7 @@ import com.todollab.board.dto.BoardDtos.UpdateColumnRequest;
 import com.todollab.board.model.BoardColumn;
 import com.todollab.board.model.BoardMember;
 import com.todollab.board.repository.BoardColumnRepository;
+import com.todollab.board.repository.BoardRepository;
 import com.todollab.common.exception.ApiException;
 import com.todollab.common.exception.ErrorCode;
 import com.todollab.common.util.PositionService;
@@ -31,17 +32,20 @@ import java.util.UUID;
 @Service
 public class BoardColumnService {
 
+    private final BoardRepository boardRepository;
     private final BoardColumnRepository boardColumnRepository;
     private final BoardAccessService boardAccessService;
     private final TaskRepository taskRepository;
     private final ApplicationEventPublisher eventPublisher;
 
     public BoardColumnService(
+            BoardRepository boardRepository,
             BoardColumnRepository boardColumnRepository,
             BoardAccessService boardAccessService,
             TaskRepository taskRepository,
             ApplicationEventPublisher eventPublisher
     ) {
+        this.boardRepository = boardRepository;
         this.boardColumnRepository = boardColumnRepository;
         this.boardAccessService = boardAccessService;
         this.taskRepository = taskRepository;
@@ -153,6 +157,12 @@ public class BoardColumnService {
 
     @Transactional
     public void deleteColumn(UUID boardId, UUID userId, UUID columnId, UUID targetColumnId, boolean deleteTasks) {
+        boardRepository.findByIdForUpdate(boardId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ErrorCode.BOARD_NOT_FOUND,
+                        "Quadro não encontrado."
+                ));
         boardAccessService.requireEditor(boardId, userId);
         findColumnOrThrow(columnId, boardId);
 

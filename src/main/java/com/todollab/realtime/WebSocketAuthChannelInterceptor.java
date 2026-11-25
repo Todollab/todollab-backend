@@ -175,13 +175,8 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
             if (eventMeta.type() == BoardEventType.BOARD_DELETED) {
                 return message;
             }
-            if (eventMeta.type() == BoardEventType.MEMBER_CHANGED) {
-                if (userId.equals(eventMeta.removedUserId())) {
-                    return message;
-                }
-                if (eventMeta.removedUserId() == null && eventMeta.action() == null) {
-                    return message;
-                }
+            if (eventMeta.type() == BoardEventType.MEMBER_CHANGED && userId.equals(eventMeta.removedUserId())) {
+                return message;
             }
         }
 
@@ -202,14 +197,11 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
 
     private OutboundEventMeta extractEventMeta(Object payload) {
         if (payload instanceof BoardEvent event) {
-            String action = null;
             UUID removedUserId = null;
             if (event.payload() instanceof Map<?, ?> map) {
-                Object actionVal = map.get("action");
-                action = actionVal != null ? actionVal.toString() : null;
                 removedUserId = parseUuid(map.get("removedUserId"));
             }
-            return new OutboundEventMeta(event.type(), action, removedUserId);
+            return new OutboundEventMeta(event.type(), removedUserId);
         }
 
         JsonNode root = readJsonTree(payload);
@@ -228,19 +220,14 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
         }
 
         JsonNode payloadNode = root.get("payload");
-        String action = null;
         UUID removedUserId = null;
         if (payloadNode != null && payloadNode.isObject()) {
-            JsonNode actionNode = payloadNode.get("action");
-            if (actionNode != null && actionNode.isTextual()) {
-                action = actionNode.asText();
-            }
             JsonNode removedNode = payloadNode.get("removedUserId");
             if (removedNode != null && removedNode.isTextual()) {
                 removedUserId = parseUuid(removedNode.asText());
             }
         }
-        return new OutboundEventMeta(eventType, action, removedUserId);
+        return new OutboundEventMeta(eventType, removedUserId);
     }
 
     private JsonNode readJsonTree(Object payload) {
@@ -325,6 +312,6 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
         }
     }
 
-    private record OutboundEventMeta(BoardEventType type, String action, UUID removedUserId) {
+    private record OutboundEventMeta(BoardEventType type, UUID removedUserId) {
     }
 }

@@ -758,6 +758,43 @@ class TaskSyncAndCrudIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
+    @Test
+    void createAndUpdateTaskRejectNullElementsInTagIdsWith400ValidationError() throws Exception {
+        User owner = createActiveUser("Lucas", "lucas-tags@example.com");
+        String ownerToken = tokenService.generateAccessToken(owner);
+
+        JsonNode boardJson = createBoard(ownerToken, "Quadro Tag Validation", "#0C2439");
+        String boardId = boardJson.get("board").get("id").asText();
+        String todoColId = boardJson.get("columns").get(0).get("id").asText();
+
+        mockMvc.perform(post("/api/v1/boards/{boardId}/tasks", boardId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Tarefa inválida\",\"tagIds\":[null]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors['tagIds[0]']").isNotEmpty());
+
+        String taskId = createTask(ownerToken, boardId, todoColId, "Tarefa válida");
+
+        mockMvc.perform(patch("/api/v1/boards/{boardId}/tasks/{taskId}", boardId, taskId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tagIds\":[null]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors['tagIds[0]']").isNotEmpty());
+
+        mockMvc.perform(patch("/api/v1/boards/{boardId}/tasks/{taskId}", boardId, taskId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tagIds\":[]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tagIds.length()").value(0));
+    }
+
     private JsonNode createBoard(String token, String name, String color) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/boards")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)

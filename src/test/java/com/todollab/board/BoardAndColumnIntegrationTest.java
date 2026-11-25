@@ -8,8 +8,12 @@ import com.todollab.auth.service.TokenService;
 import com.todollab.board.model.Board;
 import com.todollab.board.model.BoardMember;
 import com.todollab.board.model.BoardRole;
+import com.todollab.board.repository.BoardColumnRepository;
 import com.todollab.board.repository.BoardMemberRepository;
 import com.todollab.board.repository.BoardRepository;
+import com.todollab.board.service.BoardColumnService;
+import com.todollab.common.exception.ApiException;
+import com.todollab.common.exception.ErrorCode;
 import com.todollab.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +27,12 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -49,6 +59,12 @@ class BoardAndColumnIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private BoardMemberRepository boardMemberRepository;
+
+    @Autowired
+    private BoardColumnRepository boardColumnRepository;
+
+    @Autowired
+    private BoardColumnService boardColumnService;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -449,6 +465,73 @@ class BoardAndColumnIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$[2].position").value(3000.0));
 
         assertThat(boardRepository.findById(UUID.fromString(boardId))).isPresent();
+    }
+
+    @Test
+    void concurrentDeletesOfLastTwoColumnsLeaveAtLeastOneColumn() throws Exception {
+        for (int attempt = 0; attempt < 5; attempt++) {
+            User owner = createActiveUser("Concorrente " + attempt, "col-race-" + attempt + "@example.com");
+            String ownerToken = tokenService.generateAccessToken(owner);
+
+            MvcResult createResult = mockMvc.perform(post("/api/v1/boards")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of("name", "Quadro Race " + attempt))))
+                    .andExpect(status().isCreated())
+                    .andReturn();
+
+            JsonNode json = objectMapper.readTree(createResult.getResponse().getContentAsString());
+            UUID boardId = UUID.fromString(json.get("board").get("id").asText());
+            UUID col1 = UUID.fromString(json.get("columns").get(0).get("id").asText());
+            UUID col2 = UUID.fromString(json.get("columns").get(1).get("id").asText());
+            UUID col3 = UUID.fromString(json.get("columns").get(2).get("id").asText());
+
+            boardColumnService.deleteColumn(boardId, owner.getId(), col1, null, false);
+            assertThat(boardColumnRepository.countByBoardId(boardId)).isEqualTo(2);
+
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch start = new CountDownLatch(1);
+            try {
+                Callable<Boolean> deleteCol2 = () -> {
+                    ready.countDown();
+                    assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+                    try {
+                        boardColumnService.deleteColumn(boardId, owner.getId(), col2, null, false);
+                        return true;
+                    } catch (ApiException ex) {
+                        assertThat(ex.getCode()).isEqualTo(ErrorCode.LAST_COLUMN_DELETE_FORBIDDEN);
+                        return false;
+                    }
+                };
+
+                Callable<Boolean> deleteCol3 = () -> {
+                    ready.countDown();
+                    assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+                    try {
+                        boardColumnService.deleteColumn(boardId, owner.getId(), col3, null, false);
+                        return true;
+                    } catch (ApiException ex) {
+                        assertThat(ex.getCode()).isEqualTo(ErrorCode.LAST_COLUMN_DELETE_FORBIDDEN);
+                        return false;
+                    }
+                };
+
+                Future<Boolean> future2 = executor.submit(deleteCol2);
+                Future<Boolean> future3 = executor.submit(deleteCol3);
+
+                assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+                start.countDown();
+
+                boolean deleted2 = future2.get(10, TimeUnit.SECONDS);
+                boolean deleted3 = future3.get(10, TimeUnit.SECONDS);
+                assertThat(deleted2 ^ deleted3).isTrue();
+            } finally {
+                executor.shutdownNow();
+            }
+
+            assertThat(boardColumnRepository.countByBoardId(boardId)).isEqualTo(1);
+        }
     }
 
     private User createActiveUser(String name, String email) {

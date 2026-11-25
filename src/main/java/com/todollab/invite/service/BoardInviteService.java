@@ -295,13 +295,13 @@ public class BoardInviteService implements InviteAutoAcceptHook {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public boolean canAutoActivateOnRegister(String inviteToken, String normalizedEmail) {
         if (inviteToken == null || inviteToken.isBlank() || normalizedEmail == null || normalizedEmail.isBlank()) {
             return false;
         }
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        return boardInviteRepository.findByToken(inviteToken.trim())
+        return boardInviteRepository.findByTokenForUpdate(inviteToken.trim())
                 .map(invite -> matchesAutoActivate(invite, normalizedEmail, now))
                 .orElse(false);
     }

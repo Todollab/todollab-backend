@@ -116,7 +116,7 @@ public final class TaskDtos {
             TaskPriority priority,
             LocalDate dueDate,
             UUID assigneeId,
-            List<UUID> tagIds
+            List<@NotNull(message = "ID da tag não pode ser nulo") UUID> tagIds
     ) {
         public CreateTaskRequest {
             title = title != null ? title.trim() : null;
@@ -143,7 +143,7 @@ public final class TaskDtos {
         private boolean assigneeIdProvided;
         private Boolean clearAssignee;
 
-        private List<UUID> tagIds;
+        private List<@NotNull(message = "ID da tag não pode ser nulo") UUID> tagIds;
 
         public String getTitle() {
             return title;

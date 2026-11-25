@@ -7,6 +7,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -185,6 +186,29 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
+    @Test
+    void dataIntegrityViolationReturns409ConflictWithoutLeakingInternalDetails() throws Exception {
+        ProblemDetail problem = handler.handleDataIntegrityViolation(
+                new DataIntegrityViolationException("could not execute statement; constraint [uq_users_email]")
+        );
+
+        assertThat(problem.getStatus()).isEqualTo(409);
+        assertThat(problem.getDetail())
+                .isEqualTo("Conflito de dados: o registro já existe ou viola uma restrição de integridade.");
+        assertThat(problem.getProperties()).containsEntry("code", "CONFLICT");
+
+        mockMvc.perform(get("/test/data-integrity"))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.code").value("CONFLICT"))
+                .andExpect(jsonPath("$.detail")
+                        .value("Conflito de dados: o registro já existe ou viola uma restrição de integridade."))
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString())
+                        .doesNotContain("uq_users_email")
+                        .doesNotContain("could not execute"));
+    }
+
     record SamplePayload(
             @NotBlank(message = "E-mail é obrigatório") String email,
             @Size(min = 6, max = 6, message = "Código deve ter 6 caracteres")
@@ -234,6 +258,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/unexpected")
         void throwUnexpected() {
             throw new IllegalStateException("secret-db-connection-string");
+        }
+
+        @GetMapping("/test/data-integrity")
+        void throwDataIntegrity() {
+            throw new DataIntegrityViolationException("could not execute statement; constraint [uq_users_email]");
         }
     }
 }

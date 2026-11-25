@@ -82,7 +82,12 @@ public class AuthService {
         userRepository.saveAndFlush(user);
 
         if (autoActivate) {
-            UUID joinedBoardId = inviteHook.acceptOnRegister(inviteToken, user).orElse(null);
+            UUID joinedBoardId = inviteHook.acceptOnRegister(inviteToken, user)
+                    .orElseThrow(() -> new ApiException(
+                            HttpStatus.GONE,
+                            ErrorCode.INVITE_INVALID,
+                            "Este convite não é mais válido."
+                    ));
             String accessToken = tokenService.generateAccessToken(user);
             String refreshToken = refreshTokenService.issueRefreshToken(user);
             return new RegisterResult(

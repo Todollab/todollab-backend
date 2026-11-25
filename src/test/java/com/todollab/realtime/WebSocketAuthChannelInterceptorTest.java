@@ -276,6 +276,53 @@ class WebSocketAuthChannelInterceptorTest {
         assertThat(outbound.preSend(unknownSessionMessage, messageChannel)).isNull();
     }
 
+    @Test
+    void outboundMemberChangedWithoutActionOrRemovedUserIdRequiresMembership() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID otherUserId = UUID.randomUUID();
+        UUID boardId = UUID.randomUUID();
+        String sessionId = "ws-session-bypass-check";
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+
+        User activeUser = createUser(userId, "Bruno Editor", "bruno@example.com", true);
+        when(tokenService.parseAccessToken("member.jwt"))
+                .thenReturn(Optional.of(new TokenClaims(userId, "bruno@example.com")));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(activeUser));
+
+        StompHeaderAccessor connectAccessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        connectAccessor.setSessionId(sessionId);
+        connectAccessor.setNativeHeader("Authorization", "Bearer member.jwt");
+        connectAccessor.setLeaveMutable(true);
+        interceptor.preSend(MessageBuilder.createMessage(new byte[0], connectAccessor.getMessageHeaders()), messageChannel);
+
+        ChannelInterceptor outbound = interceptor.outboundChannelInterceptor();
+        String destination = "/topic/boards/" + boardId;
+
+        byte[] memberChangedWithoutActionOrRemovedUser = mapper.writeValueAsString(
+                BoardEvent.of(BoardEventType.MEMBER_CHANGED, boardId, otherUserId,
+                        Map.of("member", Map.of("userId", otherUserId)))
+        ).getBytes(StandardCharsets.UTF_8);
+
+        when(boardMemberRepository.existsByBoardIdAndUserId(boardId, userId)).thenReturn(false);
+        Message<byte[]> droppedForNonMember = outboundBrokerMessage(sessionId, destination, memberChangedWithoutActionOrRemovedUser);
+        assertThat(outbound.preSend(droppedForNonMember, messageChannel)).isNull();
+
+        SimpMessageHeaderAccessor accessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+        accessor.setSessionId(sessionId);
+        accessor.setDestination(destination);
+        accessor.setLeaveMutable(true);
+        Message<BoardEvent> rawObjectMessage = MessageBuilder.createMessage(
+                BoardEvent.of(BoardEventType.MEMBER_CHANGED, boardId, otherUserId, Map.of()),
+                accessor.getMessageHeaders()
+        );
+        assertThat(outbound.preSend(rawObjectMessage, messageChannel)).isNull();
+
+        when(boardMemberRepository.existsByBoardIdAndUserId(boardId, userId)).thenReturn(true);
+        Message<byte[]> allowedForMember = outboundBrokerMessage(sessionId, destination, memberChangedWithoutActionOrRemovedUser);
+        assertThat(outbound.preSend(allowedForMember, messageChannel)).isSameAs(allowedForMember);
+    }
+
     private Message<byte[]> outboundBrokerMessage(String sessionId, String destination, byte[] payload) {
         SimpMessageHeaderAccessor accessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
         accessor.setSessionId(sessionId);
