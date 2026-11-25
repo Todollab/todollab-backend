@@ -5,11 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.todollab.auth.model.User;
 import com.todollab.auth.repository.UserRepository;
 import com.todollab.auth.service.TokenService;
+import com.todollab.board.dto.BoardDtos.TransferOwnershipRequest;
 import com.todollab.board.model.Board;
 import com.todollab.board.model.BoardMember;
 import com.todollab.board.model.BoardRole;
 import com.todollab.board.repository.BoardMemberRepository;
 import com.todollab.board.repository.BoardRepository;
+import com.todollab.board.service.BoardMemberService;
+import com.todollab.common.exception.ApiException;
 import com.todollab.support.AbstractIntegrationTest;
 import jakarta.mail.BodyPart;
 import jakarta.mail.Multipart;
@@ -31,6 +34,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -69,6 +78,9 @@ class MemberAndInviteIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private TokenService tokenService;
+
+    @Autowired
+    private BoardMemberService boardMemberService;
 
     @BeforeEach
     void setUp() {
@@ -337,6 +349,35 @@ class MemberAndInviteIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN_ROLE"));
 
+        // Authorization runs before role=OWNER domain validation for non-owner and outsider
+        mockMvc.perform(post("/api/v1/boards/{boardId}/invites/email", boardId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + editorHelperToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("email", "x@example.com", "role", "OWNER"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN_ROLE"));
+
+        mockMvc.perform(post("/api/v1/boards/{boardId}/invites/link", boardId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + editorHelperToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("role", "OWNER"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN_ROLE"));
+
+        mockMvc.perform(post("/api/v1/boards/{boardId}/invites/email", boardId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + bobToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("email", "x@example.com", "role", "OWNER"))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("BOARD_NOT_FOUND"));
+
+        mockMvc.perform(post("/api/v1/boards/{boardId}/invites/link", boardId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + bobToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("role", "OWNER"))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("BOARD_NOT_FOUND"));
+
         mockMvc.perform(post("/api/v1/boards/{boardId}/invites/link", boardId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + bobToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -348,6 +389,13 @@ class MemberAndInviteIntegrationTest extends AbstractIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of("email", "x@example.com", "role", "OWNER"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        mockMvc.perform(post("/api/v1/boards/{boardId}/invites/link", boardId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("role", "OWNER"))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 
@@ -819,6 +867,72 @@ class MemberAndInviteIntegrationTest extends AbstractIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("INVITE_NOT_FOUND"));
+    }
+
+    @Test
+    void concurrentOwnershipTransferAndTargetMemberLeavePreserveSingleOwnerInvariant() throws Exception {
+        for (int attempt = 0; attempt < 5; attempt++) {
+            User owner = createActiveUser("Owner " + attempt, "owner-race-" + attempt + "@example.com");
+            User editor = createActiveUser("Editor " + attempt, "editor-race-" + attempt + "@example.com");
+            String ownerToken = tokenService.generateAccessToken(owner);
+
+            JsonNode boardJson = createBoard(ownerToken, "Quadro Concorrência " + attempt);
+            UUID boardId = UUID.fromString(boardJson.get("board").get("id").asText());
+            Board board = boardRepository.findById(boardId).orElseThrow();
+            boardMemberRepository.saveAndFlush(new BoardMember(board, editor, BoardRole.EDITOR));
+
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch start = new CountDownLatch(1);
+            try {
+                Callable<Boolean> transferTask = () -> {
+                    ready.countDown();
+                    assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+                    try {
+                        boardMemberService.transferOwnership(
+                                boardId,
+                                owner.getId(),
+                                new TransferOwnershipRequest(editor.getId())
+                        );
+                        return true;
+                    } catch (ApiException ex) {
+                        return false;
+                    }
+                };
+
+                Callable<Boolean> leaveTask = () -> {
+                    ready.countDown();
+                    assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+                    try {
+                        boardMemberService.removeOrLeaveMember(boardId, editor.getId(), editor.getId());
+                        return true;
+                    } catch (ApiException ex) {
+                        return false;
+                    }
+                };
+
+                Future<Boolean> transferFuture = executor.submit(transferTask);
+                Future<Boolean> leaveFuture = executor.submit(leaveTask);
+
+                assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+                start.countDown();
+
+                boolean transferred = transferFuture.get(10, TimeUnit.SECONDS);
+                boolean left = leaveFuture.get(10, TimeUnit.SECONDS);
+                assertThat(transferred ^ left).isTrue();
+            } finally {
+                executor.shutdownNow();
+            }
+
+            Board persistedBoard = boardRepository.findById(boardId).orElseThrow();
+            List<BoardMember> members = boardMemberRepository.findAllByBoardIdOrderByJoinedAtAsc(boardId);
+            List<BoardMember> owners = members.stream()
+                    .filter(m -> m.getRole() == BoardRole.OWNER)
+                    .toList();
+
+            assertThat(owners).hasSize(1);
+            assertThat(owners.get(0).getUser().getId()).isEqualTo(persistedBoard.getOwnerId());
+        }
     }
 
     private User createActiveUser(String name, String email) {

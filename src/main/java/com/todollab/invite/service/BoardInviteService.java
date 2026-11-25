@@ -78,8 +78,8 @@ public class BoardInviteService implements InviteAutoAcceptHook {
             UUID actorId,
             CreateEmailInviteRequest request
     ) {
-        validateInvitableRole(request.role());
         BoardMember ownerMembership = boardAccessService.requireOwner(boardId, actorId);
+        validateInvitableRole(request.role());
         String normalizedEmail = EmailNormalizer.normalize(request.email());
 
         userRepository.findByEmail(normalizedEmail).ifPresent(existingUser -> {
@@ -133,8 +133,8 @@ public class BoardInviteService implements InviteAutoAcceptHook {
             UUID actorId,
             CreateLinkInviteRequest request
     ) {
-        validateInvitableRole(request.role());
         BoardMember ownerMembership = boardAccessService.requireOwner(boardId, actorId);
+        validateInvitableRole(request.role());
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         OffsetDateTime expiresAt = request.expiresInDays() != null

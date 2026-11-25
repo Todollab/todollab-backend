@@ -56,6 +56,7 @@ public class BoardMemberService {
             UUID targetUserId,
             UpdateMemberRoleRequest request
     ) {
+        lockBoardOrThrow(boardId);
         boardAccessService.requireOwner(boardId, actorId);
 
         if (targetUserId.equals(actorId)) {
@@ -94,6 +95,7 @@ public class BoardMemberService {
             UUID actorId,
             TransferOwnershipRequest request
     ) {
+        Board board = lockBoardOrThrow(boardId);
         BoardMember currentOwner = boardAccessService.requireOwner(boardId, actorId);
         UUID newOwnerId = request.newOwnerId();
 
@@ -114,7 +116,6 @@ public class BoardMemberService {
         newOwner.setRole(BoardRole.OWNER);
         boardMemberRepository.saveAndFlush(newOwner);
 
-        Board board = currentOwner.getBoard();
         board.setOwnerId(newOwnerId);
         board.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         boardRepository.saveAndFlush(board);
@@ -127,6 +128,7 @@ public class BoardMemberService {
 
     @Transactional
     public void removeOrLeaveMember(UUID boardId, UUID actorId, UUID targetUserId) {
+        lockBoardOrThrow(boardId);
         BoardMember actorMember = boardAccessService.requireMember(boardId, actorId);
 
         if (targetUserId.equals(actorId)) {
@@ -159,6 +161,15 @@ public class BoardMemberService {
         }
 
         deleteMemberAndClearAssignees(boardId, targetMember);
+    }
+
+    private Board lockBoardOrThrow(UUID boardId) {
+        return boardRepository.findByIdForUpdate(boardId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ErrorCode.BOARD_NOT_FOUND,
+                        "Quadro não encontrado."
+                ));
     }
 
     private void deleteMemberAndClearAssignees(UUID boardId, BoardMember member) {
