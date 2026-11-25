@@ -1,10 +1,9 @@
 package com.todollab;
 
+import com.todollab.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest
-class CollabTodoApplicationTests {
+class CollabTodoApplicationTests extends AbstractIntegrationTest {
 
 	@Test
 	void contextLoads() {

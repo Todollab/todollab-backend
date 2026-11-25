@@ -3,7 +3,8 @@
 # =========================
 target/
 build/
-.mvn/
+.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
 !**/src/main/**/target/
 !**/src/test/**/target/
 
@@ -35,8 +36,9 @@ build/
 # =========================
 # Credenciais locais
 # =========================
-# Ignora os properties reais de dev/prod
-/src/main/resources/application-dev.properties
+# Ignora overrides locais privados
+/src/main/resources/application-local.properties
+/src/main/resources/application-prod.properties
 
 # =========================
 # Mantém templates versionados

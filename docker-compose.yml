@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: todollab-postgres
+    environment:
+      POSTGRES_DB: todollab
+      POSTGRES_USER: todollab
+      POSTGRES_PASSWORD: todollab
+    ports:
+      - "5432:5432"
+    volumes:
+      - todollab_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U todollab -d todollab"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: todollab-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  todollab_pgdata:
