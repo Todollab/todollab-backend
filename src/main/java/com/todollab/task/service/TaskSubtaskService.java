@@ -4,13 +4,17 @@ import com.todollab.board.service.BoardAccessService;
 import com.todollab.common.exception.ApiException;
 import com.todollab.common.exception.ErrorCode;
 import com.todollab.common.util.PositionService;
+import com.todollab.realtime.BoardDomainEvent;
+import com.todollab.realtime.BoardEventType;
 import com.todollab.task.dto.TaskDtos.CreateSubtaskRequest;
 import com.todollab.task.dto.TaskDtos.SubtaskResponse;
+import com.todollab.task.dto.TaskDtos.TaskResponse;
 import com.todollab.task.dto.TaskDtos.UpdateSubtaskRequest;
 import com.todollab.task.model.Task;
 import com.todollab.task.model.TaskSubtask;
 import com.todollab.task.repository.TaskRepository;
 import com.todollab.task.repository.TaskSubtaskRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,15 +30,21 @@ public class TaskSubtaskService {
     private final TaskRepository taskRepository;
     private final TaskSubtaskRepository taskSubtaskRepository;
     private final BoardAccessService boardAccessService;
+    private final TaskService taskService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TaskSubtaskService(
             TaskRepository taskRepository,
             TaskSubtaskRepository taskSubtaskRepository,
-            BoardAccessService boardAccessService
+            BoardAccessService boardAccessService,
+            TaskService taskService,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.taskRepository = taskRepository;
         this.taskSubtaskRepository = taskSubtaskRepository;
         this.boardAccessService = boardAccessService;
+        this.taskService = taskService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -44,7 +54,9 @@ public class TaskSubtaskService {
 
         double position = PositionService.appendPosition(taskSubtaskRepository.findMaxPositionByTaskId(taskId));
         TaskSubtask subtask = new TaskSubtask(task, request.title(), position);
-        return SubtaskResponse.from(taskSubtaskRepository.saveAndFlush(subtask));
+        SubtaskResponse response = SubtaskResponse.from(taskSubtaskRepository.saveAndFlush(subtask));
+        publishTaskUpdated(task, userId);
+        return response;
     }
 
     @Transactional
@@ -56,7 +68,7 @@ public class TaskSubtaskService {
             UpdateSubtaskRequest request
     ) {
         boardAccessService.requireEditor(boardId, userId);
-        findTaskOrThrow(taskId, boardId);
+        Task task = findTaskOrThrow(taskId, boardId);
 
         TaskSubtask subtask = taskSubtaskRepository.findByIdAndTaskIdAndBoardId(subtaskId, taskId, boardId)
                 .orElseThrow(() -> new ApiException(
@@ -71,6 +83,7 @@ public class TaskSubtaskService {
         if (request.done() != null) {
             subtask.setDone(request.done());
         }
+        boolean rebalanced = false;
         if (request.position() != null) {
             if (!Double.isFinite(request.position())) {
                 throw new ApiException(
@@ -90,22 +103,26 @@ public class TaskSubtaskService {
             );
             List<Double> positions = subtasks.stream().map(TaskSubtask::getPosition).toList();
             if (PositionService.needsRebalance(positions)) {
-                List<Double> rebalanced = PositionService.rebalancePositions(subtasks.size());
+                List<Double> rebalancedPositions = PositionService.rebalancePositions(subtasks.size());
                 for (int i = 0; i < subtasks.size(); i++) {
-                    subtasks.get(i).setPosition(rebalanced.get(i));
+                    subtasks.get(i).setPosition(rebalancedPositions.get(i));
                 }
                 taskSubtaskRepository.saveAllAndFlush(subtasks);
-                return SubtaskResponse.from(subtask);
+                rebalanced = true;
             }
         }
 
-        return SubtaskResponse.from(taskSubtaskRepository.saveAndFlush(subtask));
+        SubtaskResponse response = rebalanced
+                ? SubtaskResponse.from(subtask)
+                : SubtaskResponse.from(taskSubtaskRepository.saveAndFlush(subtask));
+        publishTaskUpdated(task, userId);
+        return response;
     }
 
     @Transactional
     public void deleteSubtask(UUID boardId, UUID taskId, UUID subtaskId, UUID userId) {
         boardAccessService.requireEditor(boardId, userId);
-        findTaskOrThrow(taskId, boardId);
+        Task task = findTaskOrThrow(taskId, boardId);
 
         TaskSubtask subtask = taskSubtaskRepository.findByIdAndTaskIdAndBoardId(subtaskId, taskId, boardId)
                 .orElseThrow(() -> new ApiException(
@@ -115,6 +132,21 @@ public class TaskSubtaskService {
                 ));
         taskSubtaskRepository.delete(subtask);
         taskSubtaskRepository.flush();
+        publishTaskUpdated(task, userId);
+    }
+
+    private void publishTaskUpdated(Task task, UUID userId) {
+        List<SubtaskResponse> subtasks = taskSubtaskRepository.findAllByTaskIdOrderByPositionAsc(task.getId())
+                .stream()
+                .map(SubtaskResponse::from)
+                .toList();
+        TaskResponse taskResponse = taskService.toTaskResponse(task, subtasks);
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.TASK_UPDATED,
+                task.getBoard().getId(),
+                userId,
+                taskResponse
+        ));
     }
 
     private Task findTaskOrThrow(UUID taskId, UUID boardId) {

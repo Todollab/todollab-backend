@@ -1,0 +1,17 @@
+package com.todollab.realtime;
+
+public enum BoardEventType {
+    BOARD_UPDATED,
+    BOARD_DELETED,
+    COLUMN_CREATED,
+    COLUMN_UPDATED,
+    COLUMN_MOVED,
+    COLUMN_DELETED,
+    COLUMN_REORDERED,
+    TASK_CREATED,
+    TASK_UPDATED,
+    TASK_MOVED,
+    TASK_DELETED,
+    TAG_CHANGED,
+    MEMBER_CHANGED
+}

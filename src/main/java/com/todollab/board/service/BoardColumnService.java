@@ -10,8 +10,11 @@ import com.todollab.board.repository.BoardColumnRepository;
 import com.todollab.common.exception.ApiException;
 import com.todollab.common.exception.ErrorCode;
 import com.todollab.common.util.PositionService;
+import com.todollab.realtime.BoardDomainEvent;
+import com.todollab.realtime.BoardEventType;
 import com.todollab.task.model.Task;
 import com.todollab.task.repository.TaskRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,7 +23,9 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -29,15 +34,18 @@ public class BoardColumnService {
     private final BoardColumnRepository boardColumnRepository;
     private final BoardAccessService boardAccessService;
     private final TaskRepository taskRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public BoardColumnService(
             BoardColumnRepository boardColumnRepository,
             BoardAccessService boardAccessService,
-            TaskRepository taskRepository
+            TaskRepository taskRepository,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.boardColumnRepository = boardColumnRepository;
         this.boardAccessService = boardAccessService;
         this.taskRepository = taskRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -53,7 +61,9 @@ public class BoardColumnService {
                 Boolean.TRUE.equals(request.isDoneColumn())
         );
 
-        return ColumnResponse.from(boardColumnRepository.saveAndFlush(column));
+        ColumnResponse response = ColumnResponse.from(boardColumnRepository.saveAndFlush(column));
+        eventPublisher.publishEvent(BoardDomainEvent.of(BoardEventType.COLUMN_CREATED, boardId, userId, response));
+        return response;
     }
 
     @Transactional
@@ -69,7 +79,9 @@ public class BoardColumnService {
         }
         column.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
 
-        return ColumnResponse.from(boardColumnRepository.saveAndFlush(column));
+        ColumnResponse response = ColumnResponse.from(boardColumnRepository.saveAndFlush(column));
+        eventPublisher.publishEvent(BoardDomainEvent.of(BoardEventType.COLUMN_UPDATED, boardId, userId, response));
+        return response;
     }
 
     @Transactional
@@ -108,10 +120,11 @@ public class BoardColumnService {
         );
 
         List<Double> positions = columns.stream().map(BoardColumn::getPosition).toList();
-        if (PositionService.needsRebalance(positions)) {
-            List<Double> rebalanced = PositionService.rebalancePositions(columns.size());
+        boolean rebalanced = PositionService.needsRebalance(positions);
+        if (rebalanced) {
+            List<Double> rebalancedPositions = PositionService.rebalancePositions(columns.size());
             for (int i = 0; i < columns.size(); i++) {
-                columns.get(i).setPosition(rebalanced.get(i));
+                columns.get(i).setPosition(rebalancedPositions.get(i));
                 columns.get(i).setUpdatedAt(now);
             }
             boardColumnRepository.saveAllAndFlush(columns);
@@ -119,7 +132,23 @@ public class BoardColumnService {
             boardColumnRepository.saveAndFlush(movedColumn);
         }
 
-        return columns.stream().map(ColumnResponse::from).toList();
+        List<ColumnResponse> response = columns.stream().map(ColumnResponse::from).toList();
+        if (rebalanced) {
+            eventPublisher.publishEvent(BoardDomainEvent.of(
+                    BoardEventType.COLUMN_REORDERED,
+                    boardId,
+                    userId,
+                    Map.of("columns", response)
+            ));
+        } else {
+            eventPublisher.publishEvent(BoardDomainEvent.of(
+                    BoardEventType.COLUMN_MOVED,
+                    boardId,
+                    userId,
+                    ColumnResponse.from(movedColumn)
+            ));
+        }
+        return response;
     }
 
     @Transactional
@@ -186,6 +215,11 @@ public class BoardColumnService {
         }
 
         boardColumnRepository.deleteColumnByIdAndBoardId(columnId, boardId);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("columnId", columnId);
+        payload.put("targetColumnId", targetColumnId);
+        payload.put("deleteTasks", deleteTasks);
+        eventPublisher.publishEvent(BoardDomainEvent.of(BoardEventType.COLUMN_DELETED, boardId, userId, payload));
     }
 
     private BoardColumn findColumnOrThrow(UUID columnId, UUID boardId) {

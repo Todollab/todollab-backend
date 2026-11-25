@@ -4,6 +4,7 @@ import com.todollab.auth.model.User;
 import com.todollab.auth.repository.UserRepository;
 import com.todollab.auth.service.EmailService;
 import com.todollab.auth.service.InviteAutoAcceptHook;
+import com.todollab.board.dto.BoardDtos.BoardMemberResponse;
 import com.todollab.board.model.BoardMember;
 import com.todollab.board.model.BoardRole;
 import com.todollab.board.repository.BoardMemberRepository;
@@ -21,8 +22,11 @@ import com.todollab.invite.dto.InviteDtos.PendingInviteResponse;
 import com.todollab.invite.model.BoardInvite;
 import com.todollab.invite.model.InviteType;
 import com.todollab.invite.repository.BoardInviteRepository;
+import com.todollab.realtime.BoardDomainEvent;
+import com.todollab.realtime.BoardEventType;
 import org.hibernate.Hibernate;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -44,6 +49,7 @@ public class BoardInviteService implements InviteAutoAcceptHook {
     private final UserRepository userRepository;
     private final BoardAccessService boardAccessService;
     private final EmailService emailService;
+    private final ApplicationEventPublisher eventPublisher;
     private final String frontendUrl;
 
     public BoardInviteService(
@@ -52,6 +58,7 @@ public class BoardInviteService implements InviteAutoAcceptHook {
             UserRepository userRepository,
             BoardAccessService boardAccessService,
             EmailService emailService,
+            ApplicationEventPublisher eventPublisher,
             @Value("${app.frontend-url:http://localhost:5173}") String frontendUrl
     ) {
         this.boardInviteRepository = boardInviteRepository;
@@ -59,6 +66,7 @@ public class BoardInviteService implements InviteAutoAcceptHook {
         this.userRepository = userRepository;
         this.boardAccessService = boardAccessService;
         this.emailService = emailService;
+        this.eventPublisher = eventPublisher;
         this.frontendUrl = frontendUrl.replaceAll("/+$", "");
     }
 
@@ -228,9 +236,16 @@ public class BoardInviteService implements InviteAutoAcceptHook {
             throw inviteInvalidException("Este convite atingiu o limite máximo de usos.");
         }
 
-        boardMemberRepository.saveAndFlush(new BoardMember(invite.getBoard(), user, invite.getRole()));
+        BoardMember savedMember = boardMemberRepository.saveAndFlush(new BoardMember(invite.getBoard(), user, invite.getRole()));
         invite.incrementUsesCount();
         boardInviteRepository.saveAndFlush(invite);
+
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.MEMBER_CHANGED,
+                boardId,
+                userId,
+                Map.of("action", "JOINED", "member", BoardMemberResponse.from(savedMember))
+        ));
 
         return new AcceptInviteResponse(boardId, invite.getRole());
     }
@@ -311,7 +326,13 @@ public class BoardInviteService implements InviteAutoAcceptHook {
 
         UUID boardId = invite.getBoard().getId();
         if (!boardMemberRepository.existsByBoardIdAndUserId(boardId, user.getId())) {
-            boardMemberRepository.saveAndFlush(new BoardMember(invite.getBoard(), user, invite.getRole()));
+            BoardMember savedMember = boardMemberRepository.saveAndFlush(new BoardMember(invite.getBoard(), user, invite.getRole()));
+            eventPublisher.publishEvent(BoardDomainEvent.of(
+                    BoardEventType.MEMBER_CHANGED,
+                    boardId,
+                    user.getId(),
+                    Map.of("action", "JOINED", "member", BoardMemberResponse.from(savedMember))
+            ));
         }
         invite.incrementUsesCount();
         boardInviteRepository.saveAndFlush(invite);

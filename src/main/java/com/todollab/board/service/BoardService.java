@@ -21,11 +21,14 @@ import com.todollab.board.repository.BoardMemberRepository;
 import com.todollab.board.repository.BoardRepository;
 import com.todollab.common.exception.ApiException;
 import com.todollab.common.exception.ErrorCode;
+import com.todollab.realtime.BoardDomainEvent;
+import com.todollab.realtime.BoardEventType;
 import com.todollab.task.dto.TaskDtos.TagResponse;
 import com.todollab.task.dto.TaskDtos.TaskResponse;
 import com.todollab.task.repository.TaskRepository;
 import com.todollab.task.service.BoardTagService;
 import com.todollab.task.service.TaskService;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,6 +54,7 @@ public class BoardService {
     private final TaskRepository taskRepository;
     private final TaskService taskService;
     private final BoardTagService boardTagService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public BoardService(
             BoardRepository boardRepository,
@@ -60,7 +64,8 @@ public class BoardService {
             BoardAccessService boardAccessService,
             TaskRepository taskRepository,
             TaskService taskService,
-            BoardTagService boardTagService
+            BoardTagService boardTagService,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.boardRepository = boardRepository;
         this.boardMemberRepository = boardMemberRepository;
@@ -70,6 +75,7 @@ public class BoardService {
         this.taskRepository = taskRepository;
         this.taskService = taskService;
         this.boardTagService = boardTagService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -226,13 +232,26 @@ public class BoardService {
         }
         board.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
 
-        return BoardResponse.from(boardRepository.saveAndFlush(board));
+        BoardResponse response = BoardResponse.from(boardRepository.saveAndFlush(board));
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.BOARD_UPDATED,
+                boardId,
+                userId,
+                response
+        ));
+        return response;
     }
 
     @Transactional
     public void deleteBoard(UUID boardId, UUID userId) {
         boardAccessService.requireOwner(boardId, userId);
         boardRepository.deleteBoardById(boardId);
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.BOARD_DELETED,
+                boardId,
+                userId,
+                Map.of("boardId", boardId)
+        ));
     }
 
     @Transactional

@@ -4,16 +4,20 @@ import com.todollab.board.model.BoardMember;
 import com.todollab.board.service.BoardAccessService;
 import com.todollab.common.exception.ApiException;
 import com.todollab.common.exception.ErrorCode;
+import com.todollab.realtime.BoardDomainEvent;
+import com.todollab.realtime.BoardEventType;
 import com.todollab.task.dto.TaskDtos.CreateTagRequest;
 import com.todollab.task.dto.TaskDtos.TagResponse;
 import com.todollab.task.dto.TaskDtos.UpdateTagRequest;
 import com.todollab.task.model.BoardTag;
 import com.todollab.task.repository.BoardTagRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -21,10 +25,16 @@ public class BoardTagService {
 
     private final BoardTagRepository boardTagRepository;
     private final BoardAccessService boardAccessService;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public BoardTagService(BoardTagRepository boardTagRepository, BoardAccessService boardAccessService) {
+    public BoardTagService(
+            BoardTagRepository boardTagRepository,
+            BoardAccessService boardAccessService,
+            ApplicationEventPublisher eventPublisher
+    ) {
         this.boardTagRepository = boardTagRepository;
         this.boardAccessService = boardAccessService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -47,7 +57,14 @@ public class BoardTagService {
         }
 
         BoardTag tag = new BoardTag(membership.getBoard(), request.name(), request.color());
-        return TagResponse.from(boardTagRepository.saveAndFlush(tag));
+        TagResponse response = TagResponse.from(boardTagRepository.saveAndFlush(tag));
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.TAG_CHANGED,
+                boardId,
+                userId,
+                Map.of("action", "CREATED", "tag", response)
+        ));
+        return response;
     }
 
     @Transactional
@@ -74,7 +91,14 @@ public class BoardTagService {
             tag.setColor(request.color());
         }
 
-        return TagResponse.from(boardTagRepository.saveAndFlush(tag));
+        TagResponse response = TagResponse.from(boardTagRepository.saveAndFlush(tag));
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.TAG_CHANGED,
+                boardId,
+                userId,
+                Map.of("action", "UPDATED", "tag", response)
+        ));
+        return response;
     }
 
     @Transactional
@@ -88,5 +112,11 @@ public class BoardTagService {
                     "Tag não encontrada."
             );
         }
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.TAG_CHANGED,
+                boardId,
+                userId,
+                Map.of("action", "DELETED", "tagId", tagId)
+        ));
     }
 }

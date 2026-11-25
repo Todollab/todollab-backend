@@ -9,6 +9,8 @@ import com.todollab.board.service.BoardAccessService;
 import com.todollab.common.exception.ApiException;
 import com.todollab.common.exception.ErrorCode;
 import com.todollab.common.util.PositionService;
+import com.todollab.realtime.BoardDomainEvent;
+import com.todollab.realtime.BoardEventType;
 import com.todollab.task.dto.TaskDtos.CreateTaskRequest;
 import com.todollab.task.dto.TaskDtos.MoveTaskRequest;
 import com.todollab.task.dto.TaskDtos.MyTaskResponse;
@@ -25,6 +27,7 @@ import com.todollab.task.repository.TaskRepository;
 import com.todollab.task.repository.TaskSubtaskRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,6 +56,7 @@ public class TaskService {
     private final UserRepository userRepository;
     private final BoardAccessService boardAccessService;
     private final EntityManager entityManager;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TaskService(
             TaskRepository taskRepository,
@@ -61,7 +65,8 @@ public class TaskService {
             BoardColumnRepository boardColumnRepository,
             UserRepository userRepository,
             BoardAccessService boardAccessService,
-            EntityManager entityManager
+            EntityManager entityManager,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.taskRepository = taskRepository;
         this.taskSubtaskRepository = taskSubtaskRepository;
@@ -70,6 +75,7 @@ public class TaskService {
         this.userRepository = userRepository;
         this.boardAccessService = boardAccessService;
         this.entityManager = entityManager;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -104,7 +110,9 @@ public class TaskService {
         task.replaceTags(tags);
 
         Task saved = taskRepository.saveAndFlush(task);
-        return toTaskResponse(saved, List.of());
+        TaskResponse response = toTaskResponse(saved, List.of());
+        eventPublisher.publishEvent(BoardDomainEvent.of(BoardEventType.TASK_CREATED, boardId, userId, response));
+        return response;
     }
 
     @Transactional
@@ -147,7 +155,9 @@ public class TaskService {
         task.setUpdatedAt(now);
         Task saved = taskRepository.saveAndFlush(task);
         List<SubtaskResponse> subtasks = loadSubtasksForTask(saved.getId());
-        return toTaskResponse(saved, subtasks);
+        TaskResponse response = toTaskResponse(saved, subtasks);
+        eventPublisher.publishEvent(BoardDomainEvent.of(BoardEventType.TASK_UPDATED, boardId, userId, response));
+        return response;
     }
 
     @Transactional
@@ -200,7 +210,10 @@ public class TaskService {
                 .toList();
 
         TaskResponse taskResponse = toTaskResponse(task, loadSubtasksForTask(task.getId()));
-        return new TaskMoveResponse(taskResponse, rebalanced, columnPositions);
+        TaskMoveResponse response = new TaskMoveResponse(taskResponse, rebalanced, columnPositions);
+        BoardEventType eventType = rebalanced ? BoardEventType.COLUMN_REORDERED : BoardEventType.TASK_MOVED;
+        eventPublisher.publishEvent(BoardDomainEvent.of(eventType, boardId, userId, response));
+        return response;
     }
 
     @Transactional
@@ -234,7 +247,9 @@ public class TaskService {
 
         task.setUpdatedAt(now);
         Task saved = taskRepository.saveAndFlush(task);
-        return toTaskResponse(saved, loadSubtasksForTask(saved.getId()));
+        TaskResponse response = toTaskResponse(saved, loadSubtasksForTask(saved.getId()));
+        eventPublisher.publishEvent(BoardDomainEvent.of(BoardEventType.TASK_UPDATED, boardId, userId, response));
+        return response;
     }
 
     @Transactional
@@ -242,6 +257,12 @@ public class TaskService {
         boardAccessService.requireEditor(boardId, userId);
         findTaskOrThrow(taskId, boardId);
         taskRepository.deleteTaskByIdAndBoardId(taskId, boardId);
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.TASK_DELETED,
+                boardId,
+                userId,
+                Map.of("taskId", taskId)
+        ));
     }
 
     @Transactional(readOnly = true)

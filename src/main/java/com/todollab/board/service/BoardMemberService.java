@@ -10,7 +10,10 @@ import com.todollab.board.repository.BoardMemberRepository;
 import com.todollab.board.repository.BoardRepository;
 import com.todollab.common.exception.ApiException;
 import com.todollab.common.exception.ErrorCode;
+import com.todollab.realtime.BoardDomainEvent;
+import com.todollab.realtime.BoardEventType;
 import com.todollab.task.repository.TaskRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -27,17 +31,20 @@ public class BoardMemberService {
     private final BoardRepository boardRepository;
     private final BoardAccessService boardAccessService;
     private final TaskRepository taskRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public BoardMemberService(
             BoardMemberRepository boardMemberRepository,
             BoardRepository boardRepository,
             BoardAccessService boardAccessService,
-            TaskRepository taskRepository
+            TaskRepository taskRepository,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.boardMemberRepository = boardMemberRepository;
         this.boardRepository = boardRepository;
         this.boardAccessService = boardAccessService;
         this.taskRepository = taskRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -86,7 +93,14 @@ public class BoardMemberService {
 
         targetMember.setRole(request.role());
         BoardMember saved = boardMemberRepository.saveAndFlush(targetMember);
-        return BoardMemberResponse.from(saved);
+        BoardMemberResponse response = BoardMemberResponse.from(saved);
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.MEMBER_CHANGED,
+                boardId,
+                actorId,
+                Map.of("action", "ROLE_UPDATED", "member", response)
+        ));
+        return response;
     }
 
     @Transactional
@@ -120,10 +134,17 @@ public class BoardMemberService {
         board.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         boardRepository.saveAndFlush(board);
 
-        return boardMemberRepository.findAllByBoardIdOrderByJoinedAtAsc(boardId)
+        List<BoardMemberResponse> members = boardMemberRepository.findAllByBoardIdOrderByJoinedAtAsc(boardId)
                 .stream()
                 .map(BoardMemberResponse::from)
                 .toList();
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.MEMBER_CHANGED,
+                boardId,
+                actorId,
+                Map.of("action", "OWNERSHIP_TRANSFERRED", "newOwnerId", newOwnerId, "members", members)
+        ));
+        return members;
     }
 
     @Transactional
@@ -139,7 +160,7 @@ public class BoardMemberService {
                         "O proprietário não pode sair do quadro. Transfira a propriedade antes de sair."
                 );
             }
-            deleteMemberAndClearAssignees(boardId, actorMember);
+            deleteMemberAndClearAssignees(boardId, actorId, actorMember, "LEFT");
             return;
         }
 
@@ -160,7 +181,7 @@ public class BoardMemberService {
             );
         }
 
-        deleteMemberAndClearAssignees(boardId, targetMember);
+        deleteMemberAndClearAssignees(boardId, actorId, targetMember, "REMOVED");
     }
 
     private Board lockBoardOrThrow(UUID boardId) {
@@ -172,11 +193,17 @@ public class BoardMemberService {
                 ));
     }
 
-    private void deleteMemberAndClearAssignees(UUID boardId, BoardMember member) {
+    private void deleteMemberAndClearAssignees(UUID boardId, UUID actorId, BoardMember member, String action) {
         UUID removedUserId = member.getUser().getId();
         boardMemberRepository.delete(member);
         boardMemberRepository.flush();
         taskRepository.clearAssigneeForBoard(boardId, removedUserId);
+        eventPublisher.publishEvent(BoardDomainEvent.of(
+                BoardEventType.MEMBER_CHANGED,
+                boardId,
+                actorId,
+                Map.of("action", action, "removedUserId", removedUserId)
+        ));
     }
 
     private BoardMember findBoardMemberOrThrow(UUID boardId, UUID userId) {
