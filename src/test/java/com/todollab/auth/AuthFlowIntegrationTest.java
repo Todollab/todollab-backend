@@ -421,8 +421,8 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
 
         mockMvc.perform(get("/api/v1/users/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + activeAccessToken))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("gabi@example.com"));
     }
 
     @Test
