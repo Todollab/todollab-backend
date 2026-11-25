@@ -6,6 +6,7 @@ import com.todollab.auth.repository.RefreshTokenRepository;
 import com.todollab.common.exception.ApiException;
 import com.todollab.common.exception.ErrorCode;
 import com.todollab.common.util.HashUtils;
+import org.hibernate.Hibernate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -57,11 +58,12 @@ public class RefreshTokenService {
         }
 
         String tokenHash = HashUtils.sha256Hex(rawToken);
-        RefreshToken existing = refreshTokenRepository.findByTokenHashWithUser(tokenHash)
+        RefreshToken existing = refreshTokenRepository.findByTokenHashForUpdate(tokenHash)
                 .orElseThrow(this::invalidRefreshTokenException);
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         User user = existing.getUser();
+        Hibernate.initialize(user);
 
         if (existing.getRevokedAt() != null) {
             revokeAllForUser(user.getId());
@@ -69,8 +71,6 @@ public class RefreshTokenService {
         }
 
         if (!existing.getExpiresAt().isAfter(now)) {
-            existing.setRevokedAt(now);
-            refreshTokenRepository.save(existing);
             throw invalidRefreshTokenException();
         }
 

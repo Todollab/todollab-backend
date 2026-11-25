@@ -4,6 +4,10 @@ import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.todollab.auth.service.RefreshTokenService;
+import com.todollab.common.exception.ApiException;
+import com.todollab.common.exception.ErrorCode;
+import com.todollab.common.util.HashUtils;
 import com.todollab.support.AbstractIntegrationTest;
 import jakarta.mail.BodyPart;
 import jakarta.mail.Multipart;
@@ -22,9 +26,16 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -51,6 +62,9 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private RefreshTokenService refreshTokenService;
 
     @Value("${api.security.token.secret}")
     private String jwtSecret;
@@ -449,6 +463,84 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
                         ))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_VERIFICATION_CODE"));
+    }
+
+    @Test
+    void expiredRefreshTokenDoesNotRevokeOtherActiveSessionsWhenRetried() throws Exception {
+        String expiredSessionToken = registerAndVerify("Iris Rocha", "iris@example.com", "Password123!");
+
+        MvcResult secondLogin = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", "iris@example.com",
+                                "password", "Password123!"
+                        ))))
+                .andExpect(status().isOk())
+                .andReturn();
+        String activeSessionToken = extractCookieValue(secondLogin.getResponse().getHeader(HttpHeaders.SET_COOKIE));
+
+        jdbcTemplate.update(
+                "UPDATE refresh_tokens SET expires_at = ? WHERE token_hash = ?",
+                Timestamp.from(Instant.now().minusSeconds(60)),
+                HashUtils.sha256Hex(expiredSessionToken)
+        );
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new Cookie("refresh_token", expiredSessionToken)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new Cookie("refresh_token", expiredSessionToken)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new Cookie("refresh_token", activeSessionToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(header().exists(HttpHeaders.SET_COOKIE));
+    }
+
+    @Test
+    void concurrentRefreshRotationAllowsOnlyOneSuccess() throws Exception {
+        String refreshToken = registerAndVerify("Joao Vitor", "joao@example.com", "Password123!");
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Callable<Boolean> attempt = () -> {
+                ready.countDown();
+                assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+                try {
+                    refreshTokenService.rotateRefreshToken(refreshToken);
+                    return true;
+                } catch (ApiException ex) {
+                    assertThat(ex.getCode()).isEqualTo(ErrorCode.INVALID_REFRESH_TOKEN);
+                    return false;
+                }
+            };
+
+            List<Future<Boolean>> futures = new ArrayList<>();
+            futures.add(executor.submit(attempt));
+            futures.add(executor.submit(attempt));
+
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            int successes = 0;
+            for (Future<Boolean> future : futures) {
+                if (future.get(10, TimeUnit.SECONDS)) {
+                    successes++;
+                }
+            }
+            assertThat(successes).isEqualTo(1);
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     private String registerAndVerify(String name, String email, String password) throws Exception {
