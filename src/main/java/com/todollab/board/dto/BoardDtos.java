@@ -228,4 +228,16 @@ public final class BoardDtos {
             Double position
     ) {
     }
+
+    public record UpdateMemberRoleRequest(
+            @NotNull(message = "Papel é obrigatório")
+            BoardRole role
+    ) {
+    }
+
+    public record TransferOwnershipRequest(
+            @NotNull(message = "Novo proprietário é obrigatório")
+            UUID newOwnerId
+    ) {
+    }
 }

@@ -1,6 +1,8 @@
 package com.todollab.user.controller;
 
 import com.todollab.auth.security.UserPrincipal;
+import com.todollab.invite.dto.InviteDtos.PendingInviteResponse;
+import com.todollab.invite.service.BoardInviteService;
 import com.todollab.task.dto.TaskDtos.MyTaskResponse;
 import com.todollab.task.model.TaskPriority;
 import com.todollab.task.service.TaskService;
@@ -26,10 +28,16 @@ public class UserProfileController {
 
     private final UserProfileService userProfileService;
     private final TaskService taskService;
+    private final BoardInviteService boardInviteService;
 
-    public UserProfileController(UserProfileService userProfileService, TaskService taskService) {
+    public UserProfileController(
+            UserProfileService userProfileService,
+            TaskService taskService,
+            BoardInviteService boardInviteService
+    ) {
         this.userProfileService = userProfileService;
         this.taskService = taskService;
+        this.boardInviteService = boardInviteService;
     }
 
     @GetMapping
@@ -45,6 +53,13 @@ public class UserProfileController {
             @RequestParam(required = false) String due
     ) {
         return ResponseEntity.ok(taskService.getMyTasks(principal.id(), completed, priority, due));
+    }
+
+    @GetMapping("/invites")
+    public ResponseEntity<List<PendingInviteResponse>> getMyInvites(
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        return ResponseEntity.ok(boardInviteService.listPendingInvitesForUser(principal.id(), principal.email()));
     }
 
     @PatchMapping
