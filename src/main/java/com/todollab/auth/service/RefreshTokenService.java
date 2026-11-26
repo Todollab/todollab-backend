@@ -28,13 +28,16 @@ public class RefreshTokenService {
 
     private final RefreshTokenRepository refreshTokenRepository;
     private final boolean cookieSecure;
+    private final String cookieSameSite;
 
     public RefreshTokenService(
             RefreshTokenRepository refreshTokenRepository,
-            @Value("${app.cookie.secure:false}") boolean cookieSecure
+            @Value("${app.cookie.secure:false}") boolean cookieSecure,
+            @Value("${app.cookie.same-site:Lax}") String cookieSameSite
     ) {
         this.refreshTokenRepository = refreshTokenRepository;
         this.cookieSecure = cookieSecure;
+        this.cookieSameSite = (cookieSameSite == null || cookieSameSite.isBlank()) ? "Lax" : cookieSameSite.trim();
     }
 
     @Transactional
@@ -116,7 +119,7 @@ public class RefreshTokenService {
         return ResponseCookie.from(REFRESH_COOKIE_NAME, value)
                 .httpOnly(true)
                 .secure(cookieSecure)
-                .sameSite("Lax")
+                .sameSite(cookieSameSite)
                 .path(REFRESH_COOKIE_PATH);
     }
 
