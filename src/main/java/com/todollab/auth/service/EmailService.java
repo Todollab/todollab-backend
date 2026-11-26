@@ -6,30 +6,82 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.mail.MailException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.HtmlUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 @Service
 public class EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
+    static final String BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
+    static final String RESEND_API_URL = "https://api.resend.com/emails";
 
     private final JavaMailSender mailSender;
+    private final RestClient restClient;
+    private final String provider;
     private final String fromAddress;
+    private final String fromName;
+    private final String brevoApiKey;
+    private final String resendApiKey;
 
+    public EmailService(JavaMailSender mailSender, String fromAddress) {
+        this(mailSender, "smtp", fromAddress, "Todollab", "", "");
+    }
+
+    @Autowired
     public EmailService(
             JavaMailSender mailSender,
-            @Value("${app.mail.from:no-reply@todollab.local}") String fromAddress
+            @Value("${app.mail.provider:smtp}") String provider,
+            @Value("${app.mail.from:no-reply@todollab.local}") String fromAddress,
+            @Value("${app.mail.from-name:Todollab}") String fromName,
+            @Value("${app.mail.brevo.api-key:}") String brevoApiKey,
+            @Value("${app.mail.resend.api-key:}") String resendApiKey
+    ) {
+        this(mailSender, defaultRestClient(), provider, fromAddress, fromName, brevoApiKey, resendApiKey);
+    }
+
+    EmailService(
+            JavaMailSender mailSender,
+            RestClient restClient,
+            String provider,
+            String fromAddress,
+            String fromName,
+            String brevoApiKey,
+            String resendApiKey
     ) {
         this.mailSender = mailSender;
+        this.restClient = restClient;
+        this.provider = (provider == null || provider.isBlank()) ? "smtp" : provider.trim().toLowerCase(Locale.ROOT);
         this.fromAddress = fromAddress;
+        this.fromName = (fromName == null || fromName.isBlank()) ? "Todollab" : fromName.trim();
+        this.brevoApiKey = brevoApiKey == null ? "" : brevoApiKey.trim();
+        this.resendApiKey = resendApiKey == null ? "" : resendApiKey.trim();
+    }
+
+    private static RestClient defaultRestClient() {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(Duration.ofSeconds(5));
+        requestFactory.setReadTimeout(Duration.ofSeconds(10));
+        return RestClient.builder()
+                .requestFactory(requestFactory)
+                .build();
     }
 
     public void sendVerificationCode(String toEmail, String name, String sixDigitCode) {
@@ -107,6 +159,14 @@ public class EmailService {
     }
 
     private void sendHtmlEmail(String toEmail, String subject, String htmlContent) {
+        switch (provider) {
+            case "brevo" -> sendViaBrevo(toEmail, subject, htmlContent);
+            case "resend" -> sendViaResend(toEmail, subject, htmlContent);
+            default -> sendViaSmtp(toEmail, subject, htmlContent);
+        }
+    }
+
+    private void sendViaSmtp(String toEmail, String subject, String htmlContent) {
         try {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, false, StandardCharsets.UTF_8.name());
@@ -116,13 +176,69 @@ public class EmailService {
             helper.setText(htmlContent, true);
             mailSender.send(message);
         } catch (MessagingException | MailException ex) {
-            log.error("Failed to send email to {} with subject '{}'", toEmail, subject, ex);
-            throw new ApiException(
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    ErrorCode.INTERNAL_ERROR,
-                    "Não foi possível enviar o e-mail no momento. Tente novamente mais tarde."
-            );
+            log.error("Failed to send SMTP email to {} with subject '{}'", toEmail, subject, ex);
+            throw mailFailureException();
         }
+    }
+
+    private void sendViaBrevo(String toEmail, String subject, String htmlContent) {
+        if (brevoApiKey.isBlank()) {
+            log.error("MAIL_PROVIDER=brevo is configured, but BREVO_API_KEY is blank.");
+            throw mailFailureException();
+        }
+        try {
+            Map<String, Object> payload = Map.of(
+                    "sender", Map.of("name", fromName, "email", fromAddress),
+                    "to", List.of(Map.of("email", toEmail)),
+                    "subject", subject,
+                    "htmlContent", htmlContent
+            );
+            restClient.post()
+                    .uri(BREVO_API_URL)
+                    .header("api-key", brevoApiKey)
+                    .header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientException ex) {
+            log.error("Failed to send Brevo API email to {} with subject '{}'", toEmail, subject, ex);
+            throw mailFailureException();
+        }
+    }
+
+    private void sendViaResend(String toEmail, String subject, String htmlContent) {
+        if (resendApiKey.isBlank()) {
+            log.error("MAIL_PROVIDER=resend is configured, but RESEND_API_KEY is blank.");
+            throw mailFailureException();
+        }
+        try {
+            Map<String, Object> payload = Map.of(
+                    "from", fromName + " <" + fromAddress + ">",
+                    "to", List.of(toEmail),
+                    "subject", subject,
+                    "html", htmlContent
+            );
+            restClient.post()
+                    .uri(RESEND_API_URL)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + resendApiKey)
+                    .header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientException ex) {
+            log.error("Failed to send Resend API email to {} with subject '{}'", toEmail, subject, ex);
+            throw mailFailureException();
+        }
+    }
+
+    private ApiException mailFailureException() {
+        return new ApiException(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                ErrorCode.INTERNAL_ERROR,
+                "Não foi possível enviar o e-mail no momento. Tente novamente mais tarde."
+        );
     }
 
     private String wrapLayout(String innerHtml) {
